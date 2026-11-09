@@ -1,0 +1,8 @@
+# makepkg output
+*.pkg.tar.zst
+pkg/
+src/
+
+# generated
+graphify-out/
+__pycache__/

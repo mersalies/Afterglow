@@ -1,0 +1,143 @@
+pragma Singleton
+import QtQuick
+import Quickshell
+import Quickshell.Io
+
+// Persistent settings, stored in ~/.config/afterglow/config.json.
+// The file is watched, so edits apply live.
+Singleton {
+    id: root
+
+    readonly property string dir: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/afterglow"
+
+    property alias glowEnabled: adapter.glowEnabled
+    property alias glowStrength: adapter.glowStrength
+    property alias glowWidth: adapter.glowWidth
+    property alias glowWhenPaused: adapter.glowWhenPaused
+    property alias glowAboveFullscreen: adapter.glowAboveFullscreen
+    property alias glowLine: adapter.glowLine
+    property alias glowSpeed: adapter.glowSpeed
+    property alias glowReact: adapter.glowReact
+    property alias glowSparks: adapter.glowSparks
+    property alias glowSparkSize: adapter.glowSparkSize
+    property alias glowFollowsWindow: adapter.glowFollowsWindow
+    property alias glassOpacity: adapter.glassOpacity
+    property alias videoBackground: adapter.videoBackground
+    property alias clipOffset: adapter.clipOffset
+    property alias lyricsOffset: adapter.lyricsOffset
+    property alias autoplayLiked: adapter.autoplayLiked
+    property alias youtubeCookies: adapter.youtubeCookies
+    property alias lyricsStyle: adapter.lyricsStyle
+    property alias lyricsFont: adapter.lyricsFont
+    property alias spotifyDevice: adapter.spotifyDevice
+    property alias clipCacheMB: adapter.clipCacheMB
+    property alias audioCacheMB: adapter.audioCacheMB
+    property alias artCacheMB: adapter.artCacheMB
+    property alias lyricsScale: adapter.lyricsScale
+    property alias centerMode: adapter.centerMode
+    property alias cardsShowDelay: adapter.cardsShowDelay
+    property alias cardsHideDelay: adapter.cardsHideDelay
+    property alias backdropOpacity: adapter.backdropOpacity
+    property alias backdropBlur: adapter.backdropBlur
+    property alias panelOpacity: adapter.panelOpacity
+    property alias menuOpacity: adapter.menuOpacity
+
+    // yt-dlp arguments that let YouTube see a signed-in browser (see youtubeCookies).
+    function ytCookieArgs() {
+        return adapter.youtubeCookies ? ["--cookies-from-browser", adapter.youtubeCookies] : [];
+    }
+    property alias showLyrics: adapter.showLyrics
+    property alias showLibrary: adapter.showLibrary
+    property alias view: adapter.view
+    property alias source: adapter.source
+    property alias spotifyClientId: adapter.spotifyClientId
+
+    FileView {
+        id: file
+        path: root.dir + "/config.json"
+        watchChanges: true
+        // Edits from outside are picked up live; our own writes are not re-read
+        // (rapid slider changes would otherwise bounce back to older values).
+        onFileChanged: if (Date.now() - root.lastSave > 1500) reload()
+        onAdapterUpdated: save.restart()
+        onLoadFailed: error => {
+            if (error === FileViewError.FileNotFound) {
+                mkdir.running = true;
+            }
+        }
+
+        JsonAdapter {
+            id: adapter
+            property bool glowEnabled: true
+            property real glowStrength: 1.0
+            property int glowWidth: 110
+            property bool glowWhenPaused: false
+            property bool glowAboveFullscreen: false
+            // Edge light fine-tuning (also in the glow menu in the app):
+            property real glowLine: 2.4        // line thickness, px
+            property real glowSpeed: 1.0       // how fast colours and streaks travel
+            property real glowReact: 1.0       // how hard it reacts to bass and kicks
+            property real glowSparks: 1.0      // amount of sparks (0 = none)
+            property real glowSparkSize: 1.0   // spark size
+            // Only light the monitor that shows the Afterglow window, while its workspace is visible.
+            property bool glowFollowsWindow: true
+            // How dense the window's glass is: 0 = clear, 1 = solid smoke.
+            property real glassOpacity: 0.5
+            // Music video from YouTube (yt-dlp) behind the glass, muted.
+            property bool videoBackground: true
+            // Seconds added to the track position when syncing the clip (intros differ).
+            property real clipOffset: 0
+            // Seconds added to the playback time for lyrics (+ earlier, - later).
+            property real lyricsOffset: 0
+            // When the queue runs out, keep playing random liked tracks.
+            property bool autoplayLiked: true
+            // Browser whose YouTube cookies yt-dlp may use ("firefox", "chromium", ...);
+            // empty = none. Needed when YouTube asks to "confirm you're not a bot".
+            property string youtubeCookies: ""
+            // Centre lyrics animation: "auto" (one per track) or fly, extrude,
+            // crumble, wave, glitch, neon, bounce.
+            property string lyricsStyle: "auto"
+            // Centre lyrics font ("" = the bundled Yeseva One) and size multiplier.
+            property string lyricsFont: ""
+            // Spotify Connect device to play on when the Spotify app is closed (spotifyd).
+            property string spotifyDevice: ""
+            // Disk cache limits in MB (~/.cache/afterglow); oldest files go first.
+            property int clipCacheMB: 300
+            property int audioCacheMB: 300
+            property int artCacheMB: 50
+            property real lyricsScale: 1.0
+            // Centre: "auto" (cards while the mouse moves), "lyrics" or "cards";
+            // seconds of movement before cards show / of stillness before lyrics return.
+            property string centerMode: "auto"
+            property real cardsShowDelay: 0.3
+            property real cardsHideDelay: 5
+            // Cover / clip backdrop: brightness (0-1) and blur (0-1).
+            property real backdropOpacity: 1.0
+            property real backdropBlur: 0.1
+            // Background opacity of the left panel and of the menus (0-1).
+            property real panelOpacity: 1.0
+            property real menuOpacity: 1.0
+            property bool showLyrics: true
+            property bool showLibrary: true
+            // "lyrics" (words on the centre stage) or "covers" (carousel)
+            property string view: "lyrics"
+            // "auto" or a source key from Player.sourceKey() ("spotify", "yandex", "youtube-music", ...)
+            property string source: "auto"
+            // Client ID of the user's own app at developer.spotify.com
+            property string spotifyClientId: ""
+        }
+    }
+
+    property double lastSave: 0
+    Timer {
+        id: save
+        interval: 300
+        onTriggered: { root.lastSave = Date.now(); file.writeAdapter(); }
+    }
+
+    Process {
+        id: mkdir
+        command: ["mkdir", "-p", root.dir]
+        onExited: file.writeAdapter()
+    }
+}

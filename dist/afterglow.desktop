@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Name=Afterglow
+GenericName=Music Companion
+Comment=Now playing with synced lyrics and ambient screen glow
+Comment[ru]=Сейчас играет: синхронный текст и подсветка экрана
+Exec=afterglow
+Icon=afterglow
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;lyrics;spotify;mpris;player;музыка;текст;
+StartupWMClass=afterglow
+Actions=Glow;Quit;
+
+[Desktop Action Glow]
+Name=Toggle screen glow
+Name[ru]=Подсветка вкл/выкл
+Exec=afterglow glow
+
+[Desktop Action Quit]
+Name=Quit
+Name[ru]=Выйти
+Exec=afterglow quit

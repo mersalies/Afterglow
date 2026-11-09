@@ -1,0 +1,17 @@
+#!/bin/sh
+# Afterglow launcher.
+#   afterglow              start (no-op if already running)
+#   afterglow glow|lyrics|toggle|next|previous
+#   afterglow quit
+APP_DIR="${AFTERGLOW_DIR:-/usr/share/afterglow}"
+
+case "$1" in
+    glow|lyrics|toggle|next|previous)
+        exec qs ipc -p "$APP_DIR" call afterglow "$1" ;;
+    quit)
+        exec qs kill -p "$APP_DIR" ;;
+    -h|--help)
+        sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
+exec qs -n -d -p "$APP_DIR" "$@"
