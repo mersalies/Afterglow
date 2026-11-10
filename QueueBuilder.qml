@@ -1034,5 +1034,21 @@ Item {
                 onClicked: root.hide()
             }
         }
+
+        // ---- Platform list: the last thing in the sheet, so it is on top of the
+        // results for clicks and hover; a click anywhere else just closes it.
+        MouseArea {
+            anchors.fill: parent
+            visible: picker.expanded
+            hoverEnabled: true
+            onClicked: picker.expanded = false
+            onWheel: e => e.accepted = true
+        }
+        PlatformMenu {
+            x: footer.x
+            y: footer.y + (footer.height - picker.height) / 2 - height - 8
+            open: picker.expanded
+            onPicked: picker.expanded = false
+        }
     }
 }

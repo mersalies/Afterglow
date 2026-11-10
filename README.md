@@ -195,7 +195,7 @@ hl.bind(mainMod .. " + SHIFT + M", hl.dsp.exec_cmd("afterglow glow"))
 - `Player.qml`: выбор активного MPRIS-плеера, кэш обложки, палитра из обложки (`ColorQuantizer`).
 - `Audio.qml`: cava читает PipeWire и отдаёт спектр и уровень басов.
 - `Lyrics.qml` + `lyrics-ytm.py`: тексты (свои .lrc, [LRCLIB](https://lrclib.net), NetEase, YouTube Music), разбор LRC, текущая строка и прогресс по ней.
-- `Queue.qml`: своя очередь и автопереключение; `LocalPlayer.qml`: встроенный плеер (yt-dlp + Qt Multimedia); `Search.qml`: ссылки; `Catalog.qml` + `catalog.py`: поиск артистов, альбомов и треков на выбранной площадке; `QueueBuilder.qml` (панель поиска), `PlatformPicker.qml`, `QueueList.qml`.
+- `Queue.qml`: своя очередь и автопереключение; `LocalPlayer.qml`: встроенный плеер (yt-dlp + Qt Multimedia); `Search.qml`: ссылки; `Catalog.qml` + `catalog.py`: поиск артистов, альбомов и треков на выбранной площадке; `QueueBuilder.qml` (панель поиска), `PlatformPicker.qml` + `PlatformMenu.qml` (выбор площадки), `QueueList.qml`.
 - `Accounts.qml`: привязка YouTube Music (cookies браузера) и SoundCloud (открытый профиль); `PlatformBadge.qml`: значки площадок.
 - `History.qml`: история прослушивания; `Spotify.qml` + `spotify-auth.py`: Web API и вход через PKCE.
 - `Clip.qml` + `VideoBackdrop.qml` + `ClipChip.qml`: поиск, кэш и показ клипа.
