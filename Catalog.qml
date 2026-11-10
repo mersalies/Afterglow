@@ -18,7 +18,16 @@ Singleton {
     readonly property var platforms: [
         ["youtube-music", "YouTube Music"], ["spotify", "Spotify"], ["soundcloud", "SoundCloud"], ["youtube", "YouTube"]
     ]
-    readonly property string platform: platforms.some(p => p[0] === Config.searchPlatform) ? Config.searchPlatform : "youtube-music"
+    // The service shown on the transport bar's badge: the one picked in its
+    // menu, else the one playing (or the default player); when that cannot be
+    // searched (Yandex, VK, ...), the last searchable one picked.
+    readonly property string platform: {
+        const keys = platforms.map(p => p[0]);
+        if (keys.includes(Config.source)) return Config.source;
+        const shown = Player.hasPlayer ? Player.source : Config.defaultPlayer;
+        if (keys.includes(shown)) return shown;
+        return keys.includes(Config.searchPlatform) ? Config.searchPlatform : "youtube-music";
+    }
     function platformName(key) { return (platforms.find(p => p[0] === key) || [key, key])[1]; }
 
     property string query: ""
@@ -63,11 +72,8 @@ Singleton {
         });
     }
 
-    // Search again when the platform changes.
-    Connections {
-        target: Config
-        function onSearchPlatformChanged() { if (root.query !== "" && !root.isLink) root.run(root.query); }
-    }
+    // Search again when the service changes (not under an open album).
+    onPlatformChanged: if (query !== "" && !isLink && !album) run(query)
 
     function openAlbum(a) {
         ticket++;

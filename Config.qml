@@ -45,6 +45,33 @@ Singleton {
     property alias clipQuality: adapter.clipQuality
     property alias soundcloudUser: adapter.soundcloudUser
     property alias searchPlatform: adapter.searchPlatform
+    property alias cardsScale: adapter.cardsScale
+    property alias clockScale: adapter.clockScale
+    property alias clockLayer: adapter.clockLayer
+    property alias clockFill: adapter.clockFill
+    property alias clockColor: adapter.clockColor
+    property alias clockColor2: adapter.clockColor2
+    property alias clockAngle: adapter.clockAngle
+    property alias clockOutline: adapter.clockOutline
+    property alias clockOutlineColor: adapter.clockOutlineColor
+    property alias clockOutlineColor2: adapter.clockOutlineColor2
+    property alias clockOutlineGradient: adapter.clockOutlineGradient
+    property alias clockShowLyrics: adapter.clockShowLyrics
+    property alias clockShowCovers: adapter.clockShowCovers
+    property alias clockShowClip: adapter.clockShowClip
+    property alias clockLyricsX: adapter.clockLyricsX
+    property alias clockLyricsY: adapter.clockLyricsY
+    property alias clockCoversX: adapter.clockCoversX
+    property alias clockCoversY: adapter.clockCoversY
+    property alias clockClipX: adapter.clockClipX
+    property alias clockClipY: adapter.clockClipY
+
+    function resetClock() {
+        clockScale = 1; clockLayer = "back"; clockFill = "auto"; clockColor = "#ffffff"; clockColor2 = "accent";
+        clockAngle = 90; clockOutline = 0; clockOutlineColor = "#000000"; clockOutlineColor2 = "accent";
+        clockOutlineGradient = false; clockShowLyrics = true; clockShowCovers = true; clockShowClip = true;
+        for (const s of ["Lyrics", "Covers", "Clip"]) { root["clock" + s + "X"] = -1; root["clock" + s + "Y"] = -1; }
+    }
 
     // yt-dlp arguments that let YouTube see a signed-in browser (see youtubeCookies).
     function ytCookieArgs() {
@@ -129,6 +156,35 @@ Singleton {
             property string soundcloudUser: ""
             // Where the search looks: spotify, youtube-music, soundcloud, youtube.
             property string searchPlatform: "youtube-music"
+            // Size of the cover cards in the centre of the lyrics view (multiplier).
+            property real cardsScale: 1.0
+            // Clock: size multiplier; "back" (under the lyrics and cards) or "front"
+            // (over everything but the menus); fill "auto" (from the cover), "solid"
+            // or "gradient" (clockColor to clockColor2 at clockAngle degrees, 90 =
+            // top to bottom); outline thickness in px (0 = none), its colour, and a
+            // second colour when it is a gradient. Colours are "#rrggbb" or "accent"
+            // (the cover's colour).
+            property real clockScale: 1.0
+            property string clockLayer: "back"
+            property string clockFill: "auto"
+            property string clockColor: "#ffffff"
+            property string clockColor2: "accent"
+            property real clockAngle: 90
+            property real clockOutline: 0
+            property string clockOutlineColor: "#000000"
+            property string clockOutlineColor2: "accent"
+            property bool clockOutlineGradient: false
+            // Per scene (lyrics view, covers view, a music video playing): shown or
+            // not, and where it was dragged as a share of the free room (-1 = its place).
+            property bool clockShowLyrics: true
+            property bool clockShowCovers: true
+            property bool clockShowClip: true
+            property real clockLyricsX: -1
+            property real clockLyricsY: -1
+            property real clockCoversX: -1
+            property real clockCoversY: -1
+            property real clockClipX: -1
+            property real clockClipY: -1
             property bool showLyrics: true
             property bool showLibrary: true
             // "lyrics" (words on the centre stage) or "covers" (carousel)

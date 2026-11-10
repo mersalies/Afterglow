@@ -2,27 +2,33 @@ import QtQuick
 import QtQuick.Effects
 import Quickshell.Widgets
 
-// Search, as a glass sheet rising above the transport bar. The field sits at the
-// bottom with the platform picker; results fill the sheet above it:
-//   artist found   the artist on the left over a blur of their photo (play their
-//                  top songs, or shuffled), albums in a row, top 10 songs below
-//   no artist      albums in a row, songs below
+// Search, grown out of the search bar above the transport bar. Closed, it is
+// that bar: what plays next and the queue count. Click it (or
+// Q, /) and the same glass grows up and wide into the results, the field
+// staying its bottom row; nothing else on screen is dimmed or covered except
+// what it grows over, and a click outside folds it back. Results:
+//   artist found   the artist as a card (photo over a blur of it, play their
+//                  top songs, or shuffled), top 10 songs, albums and singles
+//   no artist      songs and albums
 //   album opened   cover, title and buttons on the left, the track list on the right
-//   empty query    your library as tiles: Spotify playlists and albums, liked songs
-//                  on YouTube Music and SoundCloud, SoundCloud from the history
+//   empty query    your library on that service as tiles: Spotify playlists and
+//                  albums, liked songs on YouTube Music, SoundCloud likes and history
 //   a pasted link  what the link holds
-// The queue is a button in the field: it slides in on the right.
+// The service is the one on the transport bar's badge (Catalog.platform), picked
+// in its menu; the queue is a button in the field: it slides in on the right.
 Item {
     id: root
 
     property bool open: false
     property bool showQueue: false
-    // Bottom edge of the sheet (just above the transport bar), in our coordinates.
-    property real sheetBottom: height - 120
+    // The closed bar, in our coordinates.
+    property real dockX: 0
+    property real dockY: height - 160
+    property real dockW: 520
+    property real dockH: 44
 
     function show(text) {
         open = true;
-        picker.expanded = false;
         Catalog.closeAlbum();
         input.text = text || "";
         Catalog.run(input.text);
@@ -30,18 +36,13 @@ Item {
     }
     function hide() {
         open = false;
-        picker.expanded = false;
+        showQueue = false;
         input.focus = false;
     }
     function back() {
-        if (picker.expanded) picker.expanded = false;
-        else if (Catalog.album) Catalog.closeAlbum();
+        if (Catalog.album) Catalog.closeAlbum();
         else hide();
     }
-
-    visible: opacity > 0.01
-    opacity: open ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 220 } }
 
     readonly property bool browsing: Catalog.query === ""
     readonly property bool linkMode: Catalog.isLink
@@ -69,8 +70,13 @@ Item {
         if (scHist.length)
             out.push({ group: "SoundCloud", kind: "list", id: "sc-history", title: "Из истории", sub: scHist.length + " треков",
                        art: scHist[0].art, platform: "soundcloud", tracks: scHist });
-        return out;
+        return out.filter(t => t.platform === Catalog.platform);
     }
+
+    // Library tiles per row and rows: one row or none folds the sheet lower.
+    readonly property int libCols: Math.max(1, Math.floor((panel.openW - 28 + 14) / (150 + 14)))
+    readonly property int libRows: Math.ceil(library.length / libCols)
+    readonly property bool shortSheet: Catalog.album === null && browsing && libRows < 2 && !showQueue
 
     function openTile(c) {
         Catalog.ticket++;
@@ -98,12 +104,13 @@ Item {
         return a;
     }
 
-    // Dim the window behind; click outside to close.
-    Rectangle {
-        anchors.fill: parent
-        color: "black"
-        opacity: 0.45
-        MouseArea { anchors.fill: parent; onClicked: root.hide() }
+    // A click outside the open sheet folds it back. Nothing is dimmed, and the
+    // transport bar below stays live.
+    MouseArea {
+        width: parent.width
+        height: root.dockY + root.dockH
+        visible: root.open
+        onClicked: root.hide()
     }
 
     // =====================================================================
@@ -298,7 +305,7 @@ Item {
         id: grid
         property var list: []
         property bool numbered: true
-        readonly property int columns: width >= 640 ? 2 : 1
+        readonly property int columns: width >= 540 ? 2 : 1
         readonly property int perColumn: Math.ceil(list.length / columns)
         height: perColumn * 58
         Repeater {
@@ -432,15 +439,23 @@ Item {
         }
 
         Column {
-            x: 22
-            width: parent.width - 44
+            id: heroCol
+            readonly property real restH: heroName.implicitHeight + heroSub.height + 4 + 2
+                + (heroAbout.visible ? heroAbout.implicitHeight : 0)
+                + (playButtons.visible ? playButtons.implicitHeight : 0)
+                + (actionsRow.visibleChildren.length ? actionsRow.implicitHeight : 0)
+                + spacing * 7
+            x: 16
+            width: parent.width - 32
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 10
+            spacing: 8
 
             Cover {
                 id: heroCover
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: Math.min(parent.width, hero.height * 0.42, 260)
+                // What is left after the text and buttons (no binding loop: only
+                // the other rows' heights count).
+                width: Math.max(56, Math.min(parent.width, 220, hero.height - 32 - heroCol.restH))
                 height: width
                 radius: hero.round ? width / 2 : 18
                 texture: 600
@@ -457,6 +472,7 @@ Item {
             }
             Item { width: 1; height: 4 }
             Text {
+                id: heroName
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
@@ -464,10 +480,11 @@ Item {
                 elide: Text.ElideRight
                 text: hero.title
                 font.family: Theme.display
-                font.pixelSize: Math.min(36, Math.max(22, hero.width * 0.1))
+                font.pixelSize: Math.min(30, Math.max(20, hero.width * 0.09))
                 color: Theme.text
             }
             Row {
+                id: heroSub
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 6
                 PlatformBadge { platform: hero.platform; size: 18; anchors.verticalCenter: parent.verticalCenter }
@@ -482,8 +499,10 @@ Item {
                 }
             }
             Text {
+                id: heroAbout
                 width: parent.width
-                visible: hero.about !== ""
+                // Only when there is room for it.
+                visible: hero.about !== "" && hero.height > 470
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
                 maximumLineCount: 3
@@ -498,18 +517,18 @@ Item {
             // Side by side when there is room, one under the other when narrow.
             Grid {
                 id: playButtons
-                readonly property bool wide: hero.width >= 330
+                readonly property bool wide: hero.width >= 300
                 anchors.horizontalCenter: parent.horizontalCenter
                 columns: wide ? 2 : 1
                 spacing: 10
                 visible: hero.tracks.length > 0
                 Action {
-                    width: playButtons.wide ? (hero.width - 44 - 10) * 0.44 : hero.width - 64
+                    width: playButtons.wide ? (hero.width - 32 - 10) * 0.44 : hero.width - 48
                     icon: "play"; label: "Играть"; primary: true
                     onClicked: { Queue.playAll(hero.tracks); root.hide(); }
                 }
                 Action {
-                    width: playButtons.wide ? (hero.width - 44 - 10) * 0.56 : hero.width - 64
+                    width: playButtons.wide ? (hero.width - 32 - 10) * 0.56 : hero.width - 48
                     icon: "refresh"; label: "Перемешать"
                     onClicked: { Queue.playAll(root.shuffled(hero.tracks)); root.hide(); }
                 }
@@ -527,21 +546,30 @@ Item {
 
     Glass {
         id: panel
-        width: Math.min(1120, parent.width - 64)
-        height: Math.min(740, root.sheetBottom - 32)
-        x: (parent.width - width) / 2
-        y: root.sheetBottom - height
-        radius: 28
-        color: Theme.menuColor(0.95)
+        // About two rows of album tiles high; one row (or the hint) when that is all.
+        readonly property real openW: Math.min(920, root.width - 48)
+        readonly property real openH: Math.min(root.shortSheet ? (root.libRows ? 290 : 270) : 500, root.dockY + root.dockH - 24)
+        // Grows from the bar: its bottom edge stays put.
+        x: root.open ? (root.width - openW) / 2 : root.dockX
+        y: root.open ? root.dockY + root.dockH - openH : root.dockY
+        width: root.open ? openW : root.dockW
+        height: root.open ? openH : root.dockH
+        Behavior on x { NumberAnimation { duration: 340; easing.type: Easing.OutCubic } }
+        Behavior on y { NumberAnimation { duration: 340; easing.type: Easing.OutCubic } }
+        Behavior on width { NumberAnimation { duration: 340; easing.type: Easing.OutCubic } }
+        Behavior on height { NumberAnimation { duration: 340; easing.type: Easing.OutCubic } }
+        radius: root.open ? 24 : height / 2
+        color: root.open ? Theme.menuColor(0.95) : Qt.rgba(1, 1, 1, 0.07)
+        Behavior on color { ColorAnimation { duration: 260 } }
+        border.color: !root.open && barHover.hovered ? Qt.rgba(1, 1, 1, 0.26) : Qt.rgba(1, 1, 1, 0.12)
         clip: true
-        transformOrigin: Item.Bottom
-        scale: root.open ? 1 : 0.96
-        Behavior on scale { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
 
-        // Swallow clicks so they do not reach the dimmer.
-        MouseArea { anchors.fill: parent; onClicked: picker.expanded = false }
+        HoverHandler { id: barHover }
+        // Swallow clicks so they do not reach the catcher behind.
+        MouseArea { anchors.fill: parent }
 
-        readonly property real pad: 22
+        property real pad: root.open ? 14 : 0
+        Behavior on pad { NumberAnimation { duration: 340; easing.type: Easing.OutCubic } }
         property real queueW: root.showQueue ? Math.min(340, width * 0.32) : 0
         Behavior on queueW { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
 
@@ -551,7 +579,10 @@ Item {
             x: panel.pad
             y: panel.pad
             width: panel.width - panel.pad * 2 - (panel.queueW > 0 ? panel.queueW + 16 : 0)
-            height: footer.y - panel.pad - 14
+            height: footer.y - panel.pad - 12
+            opacity: root.open ? 1 : 0
+            visible: opacity > 0.01 && height > 60
+            Behavior on opacity { NumberAnimation { duration: root.open ? 380 : 120 } }
 
             // ---------- Album / collection
             Item {
@@ -565,7 +596,7 @@ Item {
 
                 Hero {
                     id: albumHero
-                    width: Math.max(250, parent.width * 0.34)
+                    width: Math.max(230, parent.width * 0.3)
                     height: parent.height
                     image: albumView.album?.art ?? ""
                     platform: albumView.album?.platform ?? ""
@@ -597,7 +628,7 @@ Item {
 
                 Item {
                     anchors.left: albumHero.right
-                    anchors.leftMargin: 22
+                    anchors.leftMargin: 18
                     anchors.right: parent.right
                     height: parent.height
 
@@ -654,7 +685,7 @@ Item {
                 }
             }
 
-            // ---------- Search results
+            // ---------- Search results: the artist card, then songs, then albums
             Item {
                 id: resultsView
                 anchors.fill: parent
@@ -665,9 +696,8 @@ Item {
                 Hero {
                     id: artistHero
                     visible: resultsView.hasArtist
-                    width: resultsView.hasArtist ? Math.max(250, parent.width * 0.3) : 0
+                    width: resultsView.hasArtist ? Math.max(230, parent.width * 0.28) : 0
                     height: parent.height
-                    round: true
                     image: Catalog.artist?.image ?? ""
                     platform: Catalog.platform
                     title: Catalog.artist?.name ?? ""
@@ -679,7 +709,7 @@ Item {
                 Flickable {
                     id: resultsFlick
                     anchors.left: artistHero.right
-                    anchors.leftMargin: resultsView.hasArtist ? 24 : 0
+                    anchors.leftMargin: resultsView.hasArtist ? 18 : 0
                     anchors.right: parent.right
                     height: parent.height
                     contentHeight: resultsCol.implicitHeight
@@ -689,32 +719,7 @@ Item {
                     Column {
                         id: resultsCol
                         width: resultsFlick.width
-                        spacing: 12
-
-                        SectionTitle {
-                            visible: Catalog.albums.length > 0
-                            text: resultsView.hasArtist ? "Альбомы и синглы" : "Альбомы"
-                        }
-                        ListView {
-                            id: albumRow
-                            visible: Catalog.albums.length > 0
-                            width: parent.width
-                            height: 200
-                            orientation: ListView.Horizontal
-                            spacing: 16
-                            clip: true
-                            boundsBehavior: Flickable.StopAtBounds
-                            model: Catalog.albums
-                            delegate: Tile {
-                                required property var modelData
-                                item: modelData
-                                onPicked: Catalog.openAlbum(modelData)
-                            }
-                            WheelHandler {
-                                acceptedDevices: PointerDevice.Mouse
-                                onWheel: e => albumRow.flick(e.angleDelta.y * 6, 0)
-                            }
-                        }
+                        spacing: 10
 
                         SectionTitle {
                             visible: Catalog.tracks.length > 0
@@ -725,6 +730,32 @@ Item {
                             list: Catalog.tracks
                             numbered: resultsView.hasArtist
                         }
+                        SectionTitle {
+                            visible: Catalog.albums.length > 0
+                            text: resultsView.hasArtist ? "Альбомы и синглы" : "Альбомы"
+                        }
+                        ListView {
+                            id: albumRow
+                            visible: Catalog.albums.length > 0
+                            width: parent.width
+                            height: 176
+                            orientation: ListView.Horizontal
+                            spacing: 14
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            model: Catalog.albums
+                            delegate: Tile {
+                                required property var modelData
+                                item: modelData
+                                size: 130
+                                onPicked: Catalog.openAlbum(modelData)
+                            }
+                            WheelHandler {
+                                acceptedDevices: PointerDevice.Mouse
+                                onWheel: e => albumRow.flick(e.angleDelta.y * 6, 0)
+                            }
+                        }
+
                     }
                 }
 
@@ -732,18 +763,18 @@ Item {
                 Item {
                     anchors.fill: parent
                     visible: root.busy && Catalog.albums.length === 0 && Catalog.tracks.length === 0
-                    Row {
-                        id: skelTiles
-                        spacing: 16
-                        Repeater { model: 6; Skeleton { width: 150; height: 150 } }
-                    }
                     Grid {
-                        anchors.top: skelTiles.bottom
-                        anchors.topMargin: 40
+                        id: skelRows
                         columns: 2
                         columnSpacing: 12
                         rowSpacing: 10
-                        Repeater { model: 8; Skeleton { width: content.width / 2 - 6; height: 46 } }
+                        Repeater { model: 8; Skeleton { width: content.width / 2 - 6; height: 44 } }
+                    }
+                    Row {
+                        anchors.top: skelRows.bottom
+                        anchors.topMargin: 30
+                        spacing: 14
+                        Repeater { model: 6; Skeleton { width: 130; height: 130 } }
                     }
                 }
 
@@ -782,83 +813,66 @@ Item {
                 }
             }
 
-            // ---------- Library
+            // ---------- Library: the chosen service only, two rows of tiles in view
             Flickable {
                 id: libFlick
                 anchors.fill: parent
                 visible: Catalog.album === null && root.browsing
-                contentHeight: libCol.implicitHeight
+                contentHeight: libFlow.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
 
-                readonly property var groups: {
-                    const out = [];
-                    for (const t of root.library) {
-                        let g = out.find(x => x.name === t.group);
-                        if (!g) { g = { name: t.group, items: [] }; out.push(g); }
-                        g.items.push(t);
-                    }
-                    return out;
-                }
-                readonly property int cols: Math.max(3, Math.floor((width + 16) / 176))
-                readonly property real tileSize: (width - (cols - 1) * 16) / cols
+                readonly property real tileSize: Math.max(110, Math.min(160, root.libRows >= 2 ? (height - 14) / 2 - 46 : height - 46))
 
-                Column {
-                    id: libCol
+                Flow {
+                    id: libFlow
                     width: libFlick.width
                     spacing: 14
-
                     Repeater {
-                        model: libFlick.groups
-                        Column {
+                        model: root.library
+                        Tile {
                             required property var modelData
-                            width: libCol.width
-                            spacing: 12
-                            Row {
-                                spacing: 8
-                                PlatformBadge { platform: modelData.items[0].platform; size: 22; anchors.verticalCenter: parent.verticalCenter }
-                                SectionTitle { text: modelData.name; anchors.verticalCenter: parent.verticalCenter }
-                            }
-                            Flow {
-                                width: parent.width
-                                spacing: 16
-                                Repeater {
-                                    model: modelData.items
-                                    Tile {
-                                        required property var modelData
-                                        item: modelData
-                                        size: libFlick.tileSize
-                                        onPicked: root.openTile(modelData)
-                                    }
-                                }
-                            }
+                            item: modelData
+                            size: libFlick.tileSize
+                            onPicked: root.openTile(modelData)
                         }
                     }
                 }
+            }
 
-                Column {
-                    anchors.centerIn: parent
-                    width: Math.min(460, parent.width - 40)
-                    spacing: 10
-                    visible: root.library.length === 0
-                    Text {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        text: "Найди артиста, альбом или трек"
-                        font.family: Theme.display
-                        font.pixelSize: 28
-                        color: Theme.text
-                    }
-                    Text {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.WordWrap
-                        text: "Поиск идёт по площадке слева от поля. Здесь появится твоя библиотека, когда подключишь Spotify, YouTube Music или SoundCloud в настройках → Аккаунты."
-                        font.family: Theme.font
-                        font.pixelSize: 13
-                        lineHeight: 1.3
-                        color: Theme.textSecondary
-                    }
+            // Nothing in the library on this service: what the search does.
+            Column {
+                anchors.centerIn: parent
+                width: Math.min(460, parent.width - 40)
+                spacing: 10
+                visible: Catalog.album === null && root.browsing && root.library.length === 0
+                PlatformBadge {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    platform: Catalog.platform
+                    size: 44
+                }
+                Text {
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    text: "Поиск в " + Catalog.platformName(Catalog.platform)
+                    font.family: Theme.display
+                    font.pixelSize: 26
+                    color: Theme.text
+                }
+                Text {
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    text: Catalog.platform === "spotify" && !Spotify.connected
+                        ? "Подключи Spotify в настройках → Аккаунты: здесь будут твои плейлисты, а поиск заработает."
+                        : Catalog.platform === "youtube"
+                        ? "Артист, клип или вставь ссылку. Площадку меняет значок слева в нижней панели."
+                        : "Артист, альбом или трек. Здесь будет твоя библиотека, когда подключишь аккаунт в настройках → Аккаунты. Площадку меняет значок слева в нижней панели."
+                    font.family: Theme.font
+                    font.pixelSize: 13
+                    lineHeight: 1.3
+                    color: Theme.textSecondary
                 }
             }
         }
@@ -869,7 +883,7 @@ Item {
             y: panel.pad
             width: panel.queueW
             height: content.height
-            visible: width > 20
+            visible: width > 20 && content.visible
             clip: true
             Rectangle {
                 x: -9
@@ -887,30 +901,23 @@ Item {
             }
         }
 
-        // ---- Field
+        // ---- Field (closed: the whole bar)
         Item {
             id: footer
             x: panel.pad
             width: panel.width - panel.pad * 2
-            height: 48
+            height: 44
             y: panel.height - panel.pad - height
-
-            PlatformPicker {
-                id: picker
-                anchors.verticalCenter: parent.verticalCenter
-                z: 5
-            }
 
             Rectangle {
                 id: field
-                anchors.left: picker.right
-                anchors.leftMargin: 10
-                anchors.right: queueBtn.left
-                anchors.rightMargin: 10
-                height: 48
-                radius: 24
-                color: Qt.rgba(0, 0, 0, 0.28)
-                border.width: input.activeFocus ? 2 : 1
+                anchors.left: parent.left
+                anchors.right: root.open ? queueBtn.left : parent.right
+                anchors.rightMargin: root.open ? 10 : 8
+                height: 44
+                radius: 22
+                color: root.open ? Qt.rgba(0, 0, 0, 0.28) : "transparent"
+                border.width: root.open ? (input.activeFocus ? 2 : 1) : 0
                 border.color: input.activeFocus ? Qt.rgba(Player.sourceColor(Catalog.platform).r, Player.sourceColor(Catalog.platform).g, Player.sourceColor(Catalog.platform).b, 0.8)
                                                 : Theme.hairline
 
@@ -924,27 +931,29 @@ Item {
                 }
                 TextInput {
                     id: input
-                    anchors.left: glassIcon.right
-                    anchors.leftMargin: 10
-                    anchors.right: busyDot.left
+                    anchors.left: parent.left
+                    anchors.leftMargin: 44
+                    anchors.right: root.open || !countBubble.visible ? busyDot.left : countBubble.left
                     anchors.rightMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
                     font.family: Theme.font
-                    font.pixelSize: 15
+                    font.pixelSize: root.open ? 15 : 14
                     color: Theme.text
                     selectionColor: Player.accent
                     selectedTextColor: "black"
                     clip: true
-                    onTextChanged: debounce.restart()
+                    onTextChanged: if (root.open) debounce.restart()
                     Keys.onEscapePressed: root.back()
                     Keys.onReturnPressed: { debounce.stop(); Catalog.run(text); }
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         visible: !input.text
-                        text: "Артист, альбом или трек в " + Catalog.platformName(Catalog.platform) + " — или вставь ссылку"
+                        text: root.open ? "Артист, альбом или трек в " + Catalog.platformName(Catalog.platform) + " — или вставь ссылку"
+                            : Queue.items.length > 0 ? "Далее: " + Queue.items[0].title + (Queue.items[0].artist ? " — " + Queue.items[0].artist : "")
+                            : "Поиск в " + Catalog.platformName(Catalog.platform)
                         font: input.font
-                        color: Theme.textTertiary
+                        color: !root.open && Queue.items.length > 0 ? Theme.textSecondary : Theme.textTertiary
                         elide: Text.ElideRight
                         width: parent.width
                     }
@@ -952,19 +961,48 @@ Item {
                 Rectangle {
                     id: busyDot
                     anchors.right: parent.right
-                    anchors.rightMargin: 18
+                    anchors.rightMargin: root.open ? 18 : 6
                     anchors.verticalCenter: parent.verticalCenter
                     width: 8
                     height: 8
                     radius: 4
                     color: Player.sourceColor(Catalog.platform)
-                    visible: root.busy
+                    opacity: root.open && root.busy ? 1 : 0
                     SequentialAnimation on opacity {
                         loops: Animation.Infinite
-                        running: busyDot.visible
+                        running: root.open && root.busy
                         NumberAnimation { to: 0.2; duration: 450 }
                         NumberAnimation { to: 1; duration: 450 }
                     }
+                }
+                // Closed: how many tracks wait in the queue.
+                Rectangle {
+                    id: countBubble
+                    anchors.right: parent.right
+                    anchors.rightMargin: 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !root.open && Queue.items.length > 0
+                    width: Math.max(26, bubbleText.implicitWidth + 14)
+                    height: 26
+                    radius: 13
+                    color: Qt.rgba(Player.accent.r, Player.accent.g, Player.accent.b, 0.35)
+                    Text {
+                        id: bubbleText
+                        anchors.centerIn: parent
+                        text: Queue.items.length
+                        font.family: Theme.font
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        font.features: { "tnum": 1 }
+                        color: Theme.text
+                    }
+                }
+                // Closed: the bar opens the search.
+                MouseArea {
+                    anchors.fill: parent
+                    visible: !root.open
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.show("")
                 }
                 Timer {
                     id: debounce
@@ -975,6 +1013,7 @@ Item {
 
             Rectangle {
                 id: queueBtn
+                visible: root.open
                 anchors.right: closeBtn.left
                 anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
@@ -1026,6 +1065,7 @@ Item {
 
             IconButton {
                 id: closeBtn
+                visible: root.open
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 icon: "close"
@@ -1033,22 +1073,6 @@ Item {
                 tooltip: "Закрыть (Esc)"
                 onClicked: root.hide()
             }
-        }
-
-        // ---- Platform list: the last thing in the sheet, so it is on top of the
-        // results for clicks and hover; a click anywhere else just closes it.
-        MouseArea {
-            anchors.fill: parent
-            visible: picker.expanded
-            hoverEnabled: true
-            onClicked: picker.expanded = false
-            onWheel: e => e.accepted = true
-        }
-        PlatformMenu {
-            x: footer.x
-            y: footer.y + (footer.height - picker.height) / 2 - height - 8
-            open: picker.expanded
-            onPicked: picker.expanded = false
         }
     }
 }

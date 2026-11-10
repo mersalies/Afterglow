@@ -28,11 +28,14 @@ Glass {
 
     // Source pill: the service's badge on a tint of its colour, with a ring that
     // breathes while it plays, so where the music comes from reads at a glance.
+    // A service picked in the menu stays on the badge even while another player
+    // fills in; the search looks where the badge says (Catalog.platform).
     Rectangle {
         id: sourceBtn
-        readonly property string key: Player.hasPlayer ? Player.source
+        readonly property bool picked: Config.source !== "auto"
+        readonly property string key: picked ? Config.source : Player.hasPlayer ? Player.source
             : (Config.defaultPlayer || "")
-        readonly property color tone: Player.hasPlayer || Config.defaultPlayer ? Player.sourceColor(key) : Theme.textTertiary
+        readonly property color tone: key !== "" ? Player.sourceColor(key) : Theme.textTertiary
         x: root.compact ? 6 : 10
         anchors.verticalCenter: parent.verticalCenter
         height: root.compact ? 40 : 44
@@ -63,7 +66,7 @@ Glass {
                     border.color: sourceBtn.tone
                     opacity: 0
                     SequentialAnimation {
-                        running: Player.isPlaying
+                        running: Player.isPlaying && (!sourceBtn.picked || Player.source === sourceBtn.key)
                         loops: Animation.Infinite
                         onRunningChanged: if (!running) { ring.opacity = 0; ring.scale = 1; }
                         ParallelAnimation {
@@ -75,9 +78,9 @@ Glass {
                 }
                 PlatformBadge {
                     anchors.centerIn: parent
-                    platform: Player.local ? (Player.source || "afterglow") : sourceBtn.key
+                    platform: Player.local && !sourceBtn.picked ? (Player.source || "afterglow") : sourceBtn.key
                     size: 26
-                    opacity: Player.hasPlayer ? 1 : 0.6
+                    opacity: Player.hasPlayer || sourceBtn.picked ? 1 : 0.6
                 }
             }
             Text {

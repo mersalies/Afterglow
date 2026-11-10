@@ -1,8 +1,9 @@
 import QtQuick
 
-// Settings, inside the window above the transport bar, in three tabs:
-//   Вид       what the centre shows and when, lyrics font and size, backdrop,
-//             panel and menu opacity
+// Settings, inside the window above the transport bar, in four tabs:
+//   Вид       what the centre shows and when, card size, lyrics font and size,
+//             backdrop, panel and menu opacity
+//   Часы      where the clock shows (per scene), layer, size, fill, outline
 //   Аккаунты  Spotify, YouTube Music, SoundCloud; how Yandex, VK and Apple Music
 //             are followed
 //   Плеер     default player, music-video quality, autoplay, disk cache
@@ -13,6 +14,8 @@ Glass {
     property bool open: false
     property real maxHeight: 600
     property string tab: "view"
+    // The clock scene on screen now ("Lyrics", "Covers", "Clip"), for the Часы tab.
+    property string scene: "Lyrics"
     onOpenChanged: if (open) { Cache.measure(); }
 
     radius: 18
@@ -114,6 +117,52 @@ Glass {
         }
     }
 
+    // A row of colour swatches: "accent" (the cover's colour) and fixed colours.
+    component Swatches: Flow {
+        id: sw
+        property string value
+        signal picked(string value)
+        width: parent ? parent.width : 300
+        spacing: 7
+        Repeater {
+            model: ["accent", "#ffffff", "#c7c7cc", "#1c1c1e", "#000000", "#ff453a", "#ff9f0a", "#ffd60a",
+                    "#30d158", "#64d2ff", "#0a84ff", "#5e5ce6", "#bf5af2", "#ff375f"]
+            Rectangle {
+                required property string modelData
+                readonly property bool on: sw.value.toLowerCase() === modelData
+                width: 26
+                height: 26
+                radius: 13
+                color: modelData === "accent" ? Player.accent : modelData
+                border.width: on ? 2 : 1
+                border.color: on ? "white" : Qt.rgba(1, 1, 1, 0.25)
+                scale: swArea.containsMouse ? 1.12 : 1
+                Behavior on scale { NumberAnimation { duration: 120 } }
+                Icon {
+                    anchors.centerIn: parent
+                    visible: modelData === "accent"
+                    kind: "glow"
+                    size: 14
+                    color: "white"
+                }
+                MouseArea {
+                    id: swArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: sw.picked(modelData)
+                }
+            }
+        }
+    }
+
+    component Label: Text {
+        font.family: Theme.font
+        font.pixelSize: 13
+        font.weight: Font.DemiBold
+        color: Theme.text
+    }
+
     // One service: badge, name, state, then whatever controls it needs.
     component Account: Rectangle {
         id: acc
@@ -203,10 +252,12 @@ Glass {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         if (root.tab === "view") {
-                            Config.centerMode = "auto"; Config.cardsShowDelay = 0.3; Config.cardsHideDelay = 5;
+                            Config.centerMode = "auto"; Config.cardsShowDelay = 0.3; Config.cardsHideDelay = 5; Config.cardsScale = 1;
                             Config.lyricsFont = ""; Config.lyricsScale = 1;
                             Config.backdropOpacity = 1; Config.backdropBlur = 0.1;
                             Config.panelOpacity = 1; Config.menuOpacity = 1;
+                        } else if (root.tab === "clock") {
+                            Config.resetClock();
                         } else {
                             Config.defaultPlayer = ""; Config.clipQuality = 480; Config.videoBackground = true;
                             Config.autoplayLiked = true;
@@ -219,7 +270,7 @@ Glass {
 
         Segments {
             width: parent.width
-            options: [["view", "Вид"], ["accounts", "Аккаунты"], ["player", "Плеер"]]
+            options: [["view", "Вид"], ["clock", "Часы"], ["accounts", "Аккаунты"], ["player", "Плеер"]]
             value: root.tab
             onPicked: v => { root.tab = v; flick.contentY = 0; }
         }
@@ -265,6 +316,10 @@ Glass {
                     visible: Config.centerMode === "auto"
                     label: "Текст возвращается через"; from: 1; to: 30; unit: " с"; decimals: 0
                     value: Config.cardsHideDelay; onChanged: v => Config.cardsHideDelay = Math.round(v)
+                }
+                SettingSlider {
+                    label: "Размер карточек"; from: 0.6; to: 1.8; unit: "×"
+                    value: Config.cardsScale; onChanged: v => Config.cardsScale = v
                 }
 
                 SettingHeading { text: "Текст в центре" }
@@ -346,6 +401,103 @@ Glass {
                 SettingSlider {
                     label: "Стекло окна"; from: 0; to: 1
                     value: Config.glassOpacity; onChanged: v => Config.glassOpacity = v
+                }
+            }
+
+            // ================= Часы
+
+            Column {
+                width: parent.width
+                spacing: 6
+                visible: root.tab === "clock"
+
+                SettingHeading { text: "Где показывать" }
+                Note {
+                    text: "У каждой сцены свои часы. Перетащи их мышью куда нужно, двойной щелчок вернёт на место. Сейчас: <b>"
+                        + ({ Lyrics: "текст", Covers: "обложки", Clip: "клип" })[root.scene] + "</b>."
+                }
+                SettingSwitch {
+                    label: "В режиме текста"
+                    checked: Config.clockShowLyrics
+                    onToggled: c => Config.clockShowLyrics = c
+                }
+                SettingSwitch {
+                    label: "В режиме обложек"
+                    checked: Config.clockShowCovers
+                    onToggled: c => Config.clockShowCovers = c
+                }
+                SettingSwitch {
+                    label: "Когда на фоне клип"
+                    checked: Config.clockShowClip
+                    onToggled: c => Config.clockShowClip = c
+                }
+                Pill {
+                    icon: "refresh"
+                    label: "Вернуть часы на место"
+                    onClicked: {
+                        for (const k of ["Lyrics", "Covers", "Clip"]) { Config["clock" + k + "X"] = -1; Config["clock" + k + "Y"] = -1; }
+                    }
+                }
+
+                SettingHeading { text: "Слой и размер" }
+                Segments {
+                    width: parent.width
+                    options: [["back", "Под текстом"], ["front", "Поверх всего"]]
+                    value: Config.clockLayer
+                    onPicked: v => Config.clockLayer = v
+                }
+                SettingSlider {
+                    label: "Размер"; from: 0.4; to: 2.5; unit: "×"
+                    value: Config.clockScale; onChanged: v => Config.clockScale = v
+                }
+
+                SettingHeading { text: "Цвет цифр" }
+                Segments {
+                    width: parent.width
+                    options: [["auto", "По обложке"], ["solid", "Цвет"], ["gradient", "Градиент"]]
+                    value: Config.clockFill
+                    onPicked: v => Config.clockFill = v
+                }
+                Label { visible: Config.clockFill === "gradient"; text: "Сверху / с начала" }
+                Swatches {
+                    visible: Config.clockFill !== "auto"
+                    value: Config.clockColor
+                    onPicked: v => Config.clockColor = v
+                }
+                Label { visible: Config.clockFill === "gradient"; text: "Снизу / к концу" }
+                Swatches {
+                    visible: Config.clockFill === "gradient"
+                    value: Config.clockColor2
+                    onPicked: v => Config.clockColor2 = v
+                }
+                Segments {
+                    width: parent.width
+                    visible: Config.clockFill === "gradient" || Config.clockOutlineGradient
+                    options: [["90", "Сверху вниз"], ["0", "Слева направо"], ["45", "Наискосок"]]
+                    value: String(Math.round(Config.clockAngle))
+                    onPicked: v => Config.clockAngle = parseInt(v)
+                }
+
+                SettingHeading { text: "Обводка" }
+                SettingSlider {
+                    label: "Толщина"; from: 0; to: 12; unit: " px"; decimals: 1
+                    value: Config.clockOutline; onChanged: v => Config.clockOutline = Math.round(v * 2) / 2
+                }
+                Swatches {
+                    visible: Config.clockOutline > 0
+                    value: Config.clockOutlineColor
+                    onPicked: v => Config.clockOutlineColor = v
+                }
+                SettingSwitch {
+                    visible: Config.clockOutline > 0
+                    label: "Обводка градиентом"
+                    checked: Config.clockOutlineGradient
+                    onToggled: c => Config.clockOutlineGradient = c
+                }
+                Swatches {
+                    visible: Config.clockOutline > 0 && Config.clockOutlineGradient
+                    value: Config.clockOutlineColor2
+                    onPicked: v => Config.clockOutlineColor2 = v
                 }
             }
 

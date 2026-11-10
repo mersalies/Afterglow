@@ -178,13 +178,13 @@ Item {
     // ---- Per-style timing
 
     readonly property var enterMs: ({ fly: 700, extrude: 420, crumble: 380, wave: 600, glitch: 320, neon: 900, bounce: 760, ball: 640 })
-    readonly property var exitMs: ({ fly: 600, extrude: 950, crumble: 1100, wave: 650, glitch: 420, neon: 650, bounce: 620, ball: 620 })
+    readonly property var exitMs: ({ fly: 600, extrude: 950, crumble: 1100, wave: 650, glitch: 420, neon: 650, bounce: 620, ball: 1000 })
     readonly property int enterDuration: enterMs[style] ?? 700
     readonly property int exitDuration: exitMs[style] ?? 600
     readonly property int enterEasing: ({ fly: Easing.OutExpo, extrude: Easing.OutBack, crumble: Easing.OutCubic, wave: Easing.OutCubic,
                                           glitch: Easing.Linear, neon: Easing.Linear, bounce: Easing.OutBounce, ball: Easing.OutBack })[style] ?? Easing.OutExpo
     readonly property int exitEasing: ({ fly: Easing.InCubic, extrude: Easing.OutCubic, crumble: Easing.InQuad, wave: Easing.InCubic,
-                                         glitch: Easing.InCubic, neon: Easing.Linear, bounce: Easing.InQuad })[style] ?? Easing.InCubic
+                                         glitch: Easing.InCubic, neon: Easing.Linear, bounce: Easing.InQuad, ball: Easing.OutQuad })[style] ?? Easing.InCubic
 
     function enterDelay(L) {
         switch (style) {
@@ -204,7 +204,7 @@ Item {
         case "wave": return L.index * 14;
         case "bounce": return L.d.wi * 40;
         case "fly": return L.d.wi * 20;
-        case "ball": return L.d.row * 45;
+        case "ball": return Math.abs(L.r2) * 140;
         default: return 0;
         }
     }
@@ -287,17 +287,35 @@ Item {
         }
         case "ball": {
             // Rolls in from the left turning over, drifts slowly across the lens
-            // (which reads as the ball turning), bumps on kicks, rolls off right.
+            // (which reads as the ball turning), bumps on kicks. At the end it
+            // bursts: letters in the middle sink into the ball, the rest fly off,
+            // some up and away, some falling down.
             const unit = L.d.fs;
             dx = -unit * 1.6 * e + Math.sin(t * 0.55) * unit * 0.12;
             ry = -80 * e;
             sc = Math.max(0, i) * (1 + L.pop * 0.08 + k * 0.05);
             op = Math.min(1, i * 2);
             if (o > 0) {
-                dx += unit * 2.4 * o * o;
-                ry += 70 * o;
-                sc *= 1 - 0.4 * o;
-                op *= 1 - o;
+                const cx = L.d.x + L.width / 2 - width / 2;
+                const cy = L.d.y + L.height / 2 - (layout.top + layout.bottom) / 2;
+                const near = Math.hypot(cx / Math.max(1, layout.halfW), cy / Math.max(1, layout.halfH));
+                if (near < 0.38) {
+                    // Into the ball: shrink towards its centre, darken, blur.
+                    dx -= cx * 0.6 * o;
+                    dy -= cy * 0.6 * o;
+                    sc *= 1 - 0.95 * o;
+                    op *= 1 - o;
+                    blur = o * 0.7;
+                } else {
+                    const side = Math.sign(cx) || (L.r3 > 0 ? 1 : -1);
+                    dx += side * (90 + 160 * Math.abs(L.r3)) * o;
+                    if (L.r1 > 0) dy -= (260 + 260 * Math.abs(L.r2)) * o;        // up and away
+                    else dy += (120 + 160 * Math.abs(L.r2)) * o + 520 * o * o;   // falls
+                    rot = L.r3 * 280 * o;
+                    sc *= 1 + 0.25 * o;
+                    op *= 1 - o * o;
+                    blur = o * 0.4;
+                }
             }
             break;
         }

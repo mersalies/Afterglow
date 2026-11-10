@@ -121,8 +121,10 @@ Item {
             target: Audio
             function onKicked(strength) { lens.kick = Math.min(1, strength); lensKick.restart(); }
         }
-        property real ballW: on ? root.stage.layout.halfW * 1.22 + 30 : 200
-        property real ballH: on ? root.stage.layout.halfH * 1.12 + 30 : 200
+        // Nearly round, a bit larger than the block: a long single word gets a
+        // ball, not a flat lens that smears its ends.
+        property real ballW: on ? root.stage.layout.halfW * 1.35 + 40 : 200
+        property real ballH: on ? Math.max(root.stage.layout.halfH * 1.3 + 40, ballW * 0.7) : 200
         property real ballY: on ? (root.stage.layout.top + root.stage.layout.bottom) / 2 : height / 2
         Behavior on ballW { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
         Behavior on ballH { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
@@ -133,7 +135,7 @@ Item {
             property size size: Qt.size(lens.width, lens.height)
             property point center: Qt.point(lens.width / 2, lens.ballY)
             property size radius: Qt.size(lens.ballW, lens.ballH)
-            property real strength: 0.62 + 0.18 * lens.kick
+            property real strength: 0.3 + 0.1 * lens.kick
             fragmentShader: Qt.resolvedUrl("shaders/bulge.frag.qsb")
         }
 

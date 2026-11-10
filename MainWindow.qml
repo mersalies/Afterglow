@@ -296,23 +296,71 @@ FloatingWindow {
                 onTriggered: { full.pointerActive = false; showDelay.stop(); }
             }
 
+            // ---- Clock. Each scene (lyrics view, covers view, a music video on the
+            // backdrop) has its own: shown or not, and where. It sits in its place
+            // in the layout until dragged; then it stays where it was dropped (as a
+            // share of the free room, so it survives resizes). Double-click: back.
+            readonly property string scene: video.showing ? "Clip" : lyricsView ? "Lyrics" : "Covers"
+            readonly property bool clockShown: Config["clockShow" + scene]
+            readonly property real clockFx: Config["clock" + scene + "X"]
+            readonly property real clockFy: Config["clock" + scene + "Y"]
+            readonly property bool clockPlaced: clockFx >= 0 && clockFy >= 0
+            readonly property real clockAutoX: lyricsView ? (libDocked ? dockX : m) + (dockW - clock.width) / 2
+                : cx0 + (cx1 - cx0 - clock.width) / 2
+            readonly property real clockAutoY: lyricsView ? height * 0.03 : m
+            // The docked library hangs under the clock while the lyrics scene keeps it in place.
+            readonly property bool libUnderClock: Config.clockShowLyrics && !(Config.clockLyricsX >= 0 && Config.clockLyricsY >= 0)
+
             Clock {
                 id: clock
+                z: Config.clockLayer === "front" ? 48 : 0
                 tall: full.lyricsView
-                size: full.lyricsView ? Math.max(60, Math.min(170, full.height * 0.15))
-                                      : Math.max(56, Math.min(170, full.height * 0.15))
-                x: full.lyricsView ? (full.libDocked ? full.dockX : full.m) + (full.dockW - width) / 2
-                    : full.cx0 + (full.cx1 - full.cx0 - width) / 2
-                y: full.lyricsView ? full.height * 0.03 : full.m
-                Behavior on y { Ease {} }
-                Behavior on x { Ease {} }
+                size: (full.lyricsView ? Math.max(60, Math.min(170, full.height * 0.15))
+                                       : Math.max(56, Math.min(170, full.height * 0.15))) * Math.max(0.4, Math.min(2.5, Config.clockScale))
+                x: full.clockPlaced ? full.clockFx * Math.max(0, full.width - width) : full.clockAutoX
+                y: full.clockPlaced ? full.clockFy * Math.max(0, full.height - height) : full.clockAutoY
+                opacity: full.clockShown ? 1 : 0
+                visible: opacity > 0.01
+                Behavior on opacity { NumberAnimation { duration: 400 } }
+                Behavior on y { enabled: !clockDrag.dragging; Ease {} }
+                Behavior on x { enabled: !clockDrag.dragging; Ease {} }
                 Behavior on size { Ease {} }
                 transform: Rotation {
                     origin.x: 0
                     origin.y: clock.height / 2
                     axis { x: 0; y: 1; z: 0 }
-                    angle: full.libDocked ? full.tilt : 0
+                    angle: full.libDocked && !full.clockPlaced ? full.tilt : 0
                     distanceToPlane: 1200
+                }
+
+                MouseArea {
+                    id: clockDrag
+                    anchors.fill: parent
+                    property point start
+                    property point origin
+                    property bool dragging: false
+                    cursorShape: dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                    preventStealing: true
+                    onPressed: e => {
+                        start = mapToItem(full, e.x, e.y);
+                        origin = Qt.point(clock.x, clock.y);
+                    }
+                    onPositionChanged: e => {
+                        const p = mapToItem(full, e.x, e.y);
+                        const dx = p.x - start.x, dy = p.y - start.y;
+                        if (!dragging && Math.hypot(dx, dy) < 4) return;
+                        dragging = true;
+                        const fx = Math.max(0, Math.min(1, (origin.x + dx) / Math.max(1, full.width - clock.width)));
+                        const fy = Math.max(0, Math.min(1, (origin.y + dy) / Math.max(1, full.height - clock.height)));
+                        Config["clock" + full.scene + "X"] = fx;
+                        Config["clock" + full.scene + "Y"] = fy;
+                    }
+                    onReleased: dragging = false
+                    onCanceled: dragging = false
+                    onDoubleClicked: {
+                        Config["clock" + full.scene + "X"] = -1;
+                        Config["clock" + full.scene + "Y"] = -1;
+                    }
                 }
             }
 
@@ -333,7 +381,9 @@ FloatingWindow {
                     active: coversView.visible
                     x: full.cx0
                     width: full.cx1 - full.cx0
-                    y: clock.y + clock.height + 8
+                    // Under the clock while it stands in its place in this view.
+                    y: Config.clockShowCovers && !(Config.clockCoversX >= 0 && Config.clockCoversY >= 0)
+                        ? full.clockAutoY + clock.height + 8 : full.m
                     height: (lyricLine.visible ? lyricLine.y : search.y) - y - 12
                     Behavior on x { Ease {} }
                     Behavior on width { Ease {} }
@@ -401,9 +451,9 @@ FloatingWindow {
                 id: cards
                 active: full.showCards || opacity > 0.01
                 sourceComponent: CoverFlow {}
-                width: Math.min(full.width - 2 * full.m, full.stageW * 1.15)
+                width: Math.min(full.width - 2 * full.m, full.stageW * 1.15 * Math.max(1, Config.cardsScale))
                 x: (full.width - width) / 2
-                height: Math.min(stageView.height, full.height * 0.26)
+                height: Math.min(stageView.height, full.height * 0.26 * Config.cardsScale)
                 y: stageView.y + (stageView.height - height) / 2
                 opacity: full.showCards ? 1 : 0
                 scale: full.showCards ? 1 : 0.92
@@ -436,7 +486,7 @@ FloatingWindow {
                 z: 45
                 floating: full.lyricsView && full.libDocked
                 // The panel slides over the foot of the digits.
-                y: full.lyricsView && full.libDocked ? clock.y + clock.height * 0.84 : full.m
+                y: full.lyricsView && full.libDocked ? (full.libUnderClock ? full.clockAutoY + clock.height * 0.84 : full.clockAutoY) : full.m
                 width: full.lyricsView && full.libDocked ? full.dockW : full.libW
                 height: (full.lyricsView && full.libDocked ? bar.y + bar.height : full.panelBottom) - y
                 x: !Config.showLibrary ? -width - 40 : full.lyricsView && full.libDocked ? full.dockX : full.m
@@ -479,10 +529,11 @@ FloatingWindow {
                 }
             }
 
-            SearchBar {
+            // Where the search bar sits; the search sheet (builder) draws it and
+            // grows out of it.
+            Item {
                 id: search
-                onActivated: builder.show("")
-                z: 47
+                readonly property bool open: builder.open
                 width: full.lyricsView ? bar.width - centreSwitch.width - 10 : Math.min(560, bar.width - 40)
                 x: full.lyricsView ? bar.x : bar.x + (bar.width - width) / 2
                 Behavior on width { Ease {} }
@@ -535,7 +586,10 @@ FloatingWindow {
                 id: builder
                 z: 70
                 anchors.fill: parent
-                sheetBottom: bar.y - 12
+                dockX: search.x
+                dockY: search.y
+                dockW: search.width
+                dockH: search.height
             }
 
             // Settings and glow menus open at the right edge of the window, just
@@ -543,6 +597,7 @@ FloatingWindow {
             SettingsMenu {
                 id: settingsMenu
                 z: 50
+                scene: full.scene
                 maxHeight: bar.y - 10 - full.m
                 x: full.width - width - full.m
                 y: Math.max(full.m, bar.y - height - 10)
@@ -565,7 +620,8 @@ FloatingWindow {
 
             SourceMenu {
                 id: menu
-                z: 50
+                // Above the search sheet: it picks the service the search uses too.
+                z: 75
                 x: bar.x + 10
                 y: bar.y - height - 10
                 onPicked: open = false
