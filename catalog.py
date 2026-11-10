@@ -5,15 +5,25 @@
     catalog.py album   PLATFORM ID         -> {"title", "artist", "art", "sub", "tracks"}
 
 PLATFORM: youtube-music (the YouTube Music app's own endpoints, unofficial),
-soundcloud and youtube (through yt-dlp). Prints one JSON object; on failure an
-empty result and a message on stderr. Spotify is searched in Spotify.qml.
+soundcloud and youtube (through yt-dlp). Prints one JSON object per line: a
+slow search prints what it has first (SoundCloud: the artist and songs, then
+again with the albums), the last line is the whole result. On failure an empty
+result and a message on stderr. Spotify is searched in Spotify.qml.
 """
 import json
 import re
 import subprocess
 import sys
 import unicodedata
+import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+
+UA = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
+
+
+def emit(d):
+    print(json.dumps(d, ensure_ascii=False), flush=True)
 
 # ----------------------------------------------------------------- helpers
 
@@ -70,10 +80,15 @@ def ytm(endpoint, body):
     req = urllib.request.Request(
         "https://music.youtube.com/youtubei/v1/" + endpoint + "?prettyPrint=false",
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json",
-                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.load(r)
+        headers={"Content-Type": "application/json", "User-Agent": UA})
+    # A stalled connection is retried once instead of waiting it out.
+    for attempt in (0, 1):
+        try:
+            with urllib.request.urlopen(req, timeout=7) as r:
+                return json.load(r)
+        except OSError:
+            if attempt:
+                raise
 
 
 def ytm_row(row, album=None):
@@ -157,10 +172,16 @@ def audience(text):
 def ytm_search(q):
     nq = norm(q)
     artist = None
+    # The three searches at once; songs and albums are only used without an artist.
+    pool = ThreadPoolExecutor(3)
+    f_artists = pool.submit(ytm, "search", {"query": q, "params": ARTISTS})
+    f_songs = pool.submit(ytm, "search", {"query": q, "params": SONGS})
+    f_albums = pool.submit(ytm, "search", {"query": q, "params": ALBUMS})
+    pool.shutdown(wait=False)
     # Artists named exactly like the query (or containing it); the same name often
     # has several channels, so the one with the most subscribers wins.
     best = -1
-    found = ytm("search", {"query": q, "params": ARTISTS})
+    found = f_artists.result()
     for row in list(find(found, "musicResponsiveListItemRenderer"))[:6]:
         bid = next(find(row.get("navigationEndpoint", {}), "browseId"), "")
         cols = [c.get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}) for c in row.get("flexColumns", [])]
@@ -201,9 +222,9 @@ def ytm_search(q):
                 uniq.append(a)
         return {"artist": artist, "albums": uniq[:16], "tracks": tracks[:10]}
 
-    songs = ytm_rows(ytm("search", {"query": q, "params": SONGS}), limit=10)
+    songs = ytm_rows(f_songs.result(), limit=10)
     albums = [t for t in (ytm_tile({"musicResponsiveListItemRenderer": r})
-                          for r in find(ytm("search", {"query": q, "params": ALBUMS}), "musicResponsiveListItemRenderer")) if t]
+                          for r in find(f_albums.result(), "musicResponsiveListItemRenderer")) if t]
     return {"artist": None, "albums": albums[:12], "tracks": songs}
 
 
@@ -255,8 +276,27 @@ def entry_track(e, source):
             "source": source, "length": e.get("duration") or 0}
 
 
+def sc_art(url):
+    """Cover of a SoundCloud page (track, set, profile) from its public oEmbed."""
+    try:
+        req = urllib.request.Request("https://soundcloud.com/oembed?format=json&url=" + urllib.parse.quote(url, safe=""),
+                                     headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            return json.load(r).get("thumbnail_url") or ""
+    except Exception:
+        return ""
+
+
+def sc_fill_art(items, key):
+    """Covers for the items without one, fetched side by side."""
+    need = [x for x in items if not x.get("art") and x.get(key)]
+    with ThreadPoolExecutor(8) as ex:
+        for x, art in zip(need, ex.map(lambda x: sc_art(x[key]), need)):
+            x["art"] = art
+
+
 def sc_search(q):
-    data = ytdlp("scsearch20:" + q)
+    data = ytdlp("scsearch10:" + q)
     entries = data.get("entries") or []
     tracks = [t for t in (entry_track(e, "soundcloud") for e in entries) if t]
     nq = norm(q)
@@ -270,9 +310,13 @@ def sc_search(q):
     if artist and artist["id"]:
         mine = [t for t in tracks if t["artist"] == artist["name"]]
         tracks = mine + [t for t in tracks if t["artist"] != artist["name"]]
+        # The artist and songs show while the albums load (another yt-dlp run).
+        emit({"artist": artist, "albums": [], "tracks": tracks[:10]})
         sets = ytdlp(artist["id"] + "/albums").get("entries") or []
         albums = [{"id": s["url"], "title": s.get("title") or "", "sub": "Альбом", "art": "", "year": "",
                    "platform": "soundcloud"} for s in sets if s.get("url")][:16]
+        sc_fill_art(albums, "id")
+    sc_fill_art(tracks[:10], "uri")
     return {"artist": artist, "albums": albums, "tracks": tracks[:10]}
 
 
@@ -292,7 +336,7 @@ def sc_album(url):
             t["artist"] = e.get("uploader") or data.get("uploader") or (m.group(1).replace("-", " ").title() if m else "")
             tracks.append(t)
     return {"title": data.get("title") or "", "artist": data.get("uploader") or "", "sub": "SoundCloud",
-            "about": "", "art": "", "tracks": tracks}
+            "about": "", "art": sc_art(url), "tracks": tracks}
 
 
 def yt_search(q):
@@ -316,7 +360,7 @@ def main():
     }.get((what, platform))
     if not fn:
         sys.exit(2)
-    print(json.dumps(fn(arg), ensure_ascii=False))
+    emit(fn(arg))
 
 
 if __name__ == "__main__":

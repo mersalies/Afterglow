@@ -517,7 +517,8 @@ Glass {
                     platform: "spotify"
                     name: "Spotify"
                     linked: Spotify.connected
-                    info: Spotify.connected ? "Подключён · " + Spotify.playlists.length + " плейлистов, " + Spotify.liked.length + " любимых"
+                    info: Spotify.connected && Spotify.limitText ? Spotify.limitText
+                        : Spotify.connected ? "Подключён · " + Spotify.playlists.length + " плейлистов, " + Spotify.liked.length + " любимых"
                         : Spotify.status === "signing-in" ? "Жду вход в браузере…"
                         : Spotify.status === "error" ? (Spotify.error || "Ошибка входа")
                         : "Не подключён"

@@ -53,7 +53,8 @@ Item {
     readonly property var library: {
         const out = [];
         if (Spotify.connected) {
-            out.push({ group: "Spotify", kind: "liked", id: "liked", title: "Любимые треки", sub: Spotify.liked.length + " треков", art: "", platform: "spotify" });
+            out.push({ group: "Spotify", kind: "liked", id: "liked", title: "Любимые треки", art: "", platform: "spotify", uri: Spotify.likedUri,
+                       sub: Spotify.liked.length || !Spotify.limitText ? Spotify.liked.length + " треков" : "Spotify ограничил запросы" });
             for (const p of Spotify.playlists)
                 out.push({ group: "Spotify", kind: "playlist", id: p.id, title: p.name, sub: p.count + " треков", art: p.image, uri: p.uri, platform: "spotify" });
             for (const a of Spotify.albums)
@@ -662,7 +663,9 @@ Item {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.WordWrap
-                            text: albumView.album?.platform === "spotify" && albumView.album?.uri
+                            text: albumView.album?.platform === "spotify" && Spotify.limitText
+                                ? Spotify.limitText + ". Пока можно включить целиком: «В Spotify»."
+                                : albumView.album?.platform === "spotify" && albumView.album?.uri
                                 ? "Spotify не показывает треки этого плейлиста (чужие плейлисты скрыты с 2026 года). Его можно включить целиком: «В Spotify»."
                                 : "Треки не загрузились"
                             font.family: Theme.font

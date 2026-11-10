@@ -93,7 +93,9 @@ Singleton {
     function closeAlbum() { album = null; }
 
     // ---- catalog.py: one process per request, so a cancelled one can never
-    // answer for the next (each knows its own ticket).
+    // answer for the next (each knows its own ticket). Each line it prints is a
+    // fuller result (SoundCloud: songs first, then albums), shown as it comes;
+    // one that hangs is given up after 25 s.
 
     property var job: null
     function helperRun(args, t, cb) {
@@ -113,25 +115,31 @@ Singleton {
             id: p
             property int ticket
             property var cb
-            property bool exited: false
-            property bool read: false
-            function settle() { if (exited && read) { if (root.job === p) root.job = null; p.destroy(); } }
-            stdout: StdioCollector {
-                onStreamFinished: {
-                    p.read = true;
-                    if (p.ticket === root.ticket && text.trim() !== "") {
-                        let d = null;
-                        try { d = JSON.parse(text); } catch (e) {}
-                        if (d) { root.busy = false; root.message = ""; p.cb(d); }
-                        else root.fail(p.ticket);
-                    }
-                    p.settle();
+            property bool got: false
+            stdout: SplitParser {
+                onRead: line => {
+                    if (p.ticket !== root.ticket || line.trim() === "") return;
+                    let d = null;
+                    try { d = JSON.parse(line); } catch (e) {}
+                    if (!d) return;
+                    p.got = true;
+                    root.message = "";
+                    p.cb(d);
                 }
             }
             onExited: code => {
-                p.exited = true;
-                if (code !== 0) root.fail(p.ticket);
-                p.settle();
+                watchdog.stop();
+                if (p.ticket === root.ticket) {
+                    root.busy = false;
+                    if (code !== 0 || !p.got) root.fail(p.ticket);
+                }
+                if (root.job === p) root.job = null;
+                Qt.callLater(p.destroy);
+            }
+            onRunningChanged: if (running) watchdog.restart()
+            property Timer watchdog: Timer {
+                interval: 25000
+                onTriggered: p.running = false
             }
         }
     }

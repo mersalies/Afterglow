@@ -160,7 +160,8 @@ Glass {
                     required property var modelData
                     width: ListView.view.width
                     title: modelData.name
-                    subtitle: modelData.id === "liked" ? "" : modelData.count + " треков"
+                    subtitle: modelData.id !== "liked" ? modelData.count + " треков"
+                        : modelData.count ? modelData.count + " треков" : Spotify.limitText ? "Spotify ограничил запросы" : ""
                     art: modelData.image
                     onClicked: Spotify.open(modelData)
                 }

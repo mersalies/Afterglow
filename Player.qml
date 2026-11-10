@@ -183,27 +183,44 @@ Singleton {
     }
 
     // Covers are copied into ~/.cache so history keeps them after the player forgets them.
-    onArtUrlChanged: {
-        if (artUrl === "") {
-            localArt = "";
-            return;
-        }
-        const target = cacheDir + "/" + hash(artUrl + "|" + title);
-        const remote = artUrl.startsWith("http");
-        const src = remote ? artUrl : decodeURIComponent(artUrl.replace(/^file:\/\//, ""));
-        fetchArt.target = target;
-        fetchArt.command = ["sh", "-c", Cache.pruneFn + (remote
-            ? 'mkdir -p "$1" && { [ -s "$2" ] || { curl -sfL --max-time 10 -o "$2.part" "$3" && mv "$2.part" "$2"; }; }'
-            : 'mkdir -p "$1" && cp -f "$3" "$2"') + '; s=$?; touch "$2" 2>/dev/null; prune "$1" "$4"; exit $s',
-            "sh", cacheDir, target, src, String(Cache.limitBytes(Config.artCacheMB))];
-        fetchArt.running = true;
-        if (!remote) localArt = artUrl;
+    // Until the copy of this track's cover is there, the cover is shown straight from
+    // its URL (never the previous track's file); a copy that finishes after the
+    // track changed is ignored. One process per cover, so a slow one cannot answer
+    // for the next.
+    onArtUrlChanged: artDebounce.restart()
+    // Players change title and cover in separate updates: settle first.
+    Timer {
+        id: artDebounce
+        interval: 120
+        onTriggered: root.cacheArt()
     }
-
-    Process {
-        id: fetchArt
-        property string target
-        onExited: code => { if (code === 0) root.localArt = "file://" + target; }
+    function cacheArt() {
+        const url = artUrl;
+        if (url === "") { localArt = ""; return; }
+        const remote = url.startsWith("http");
+        if (!remote) { localArt = url; return; }
+        localArt = "";
+        const target = cacheDir + "/" + hash(url);
+        artComp.createObject(root, {
+            url, target,
+            command: ["sh", "-c", Cache.pruneFn +
+                'mkdir -p "$1" && { [ -s "$2" ] || { curl -sfL --retry 2 --max-time 15 -o "$2.part" "$3" && mv "$2.part" "$2"; }; }'
+                + '; s=$?; touch "$2" 2>/dev/null; prune "$1" "$4"; exit $s',
+                "sh", cacheDir, target, url, String(Cache.limitBytes(Config.artCacheMB))],
+            running: true
+        });
+    }
+    Component {
+        id: artComp
+        Process {
+            id: ap
+            property string url
+            property string target
+            onExited: code => {
+                if (code === 0 && ap.url === root.artUrl) root.localArt = "file://" + ap.target;
+                Qt.callLater(ap.destroy);
+            }
+        }
     }
 
     // ---- Palette

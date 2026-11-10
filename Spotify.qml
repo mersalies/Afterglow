@@ -85,6 +85,7 @@ Singleton {
 
     function logout() {
         logoutProc.running = true;
+        cacheFile.setText("{}");
         token = "";
         status = "idle";
         playlists = [];
@@ -99,8 +100,39 @@ Singleton {
     }
 
     // ---- Web API
+    // Spotify limits how often an app may call it, per kind of request. On "429
+    // Too Many Requests" that kind of request rests for as long as Spotify asks
+    // (Retry-After, remembered across restarts) and answers 429 at once meanwhile,
+    // so a blocked endpoint is not hammered further.
+
+    property var blocked: ({})          // { "/me/tracks": until-ms }
+    property double limitedUntil: 0     // the latest of them, for messages
+    function apiKey(path) {
+        return path.replace(/^https:\/\/api\.spotify\.com\/v1/, "").split("?")[0]
+            .replace(/\/(playlists|albums|artists|tracks)\/[^/]+/, "/$1/:id");
+    }
+    function isBlocked(path) { return (blocked[apiKey(path)] ?? 0) > Date.now(); }
+    function block(path, seconds) {
+        const until = Date.now() + Math.max(30, seconds || 60) * 1000;
+        const next = Object.assign({}, blocked);
+        next[apiKey(path)] = until;
+        blocked = next;
+        limitedUntil = Math.max(limitedUntil, until);
+        saveCache.restart();
+        console.warn("Afterglow: Spotify limited", apiKey(path), "for", Math.round((until - Date.now()) / 60000), "min");
+    }
+    // When the rest is over, load what could not be loaded.
+    Timer {
+        running: root.limitedUntil > 0
+        interval: 60000
+        repeat: true
+        onTriggered: if (Date.now() > root.limitedUntil) { root.limitedUntil = 0; root.blocked = {}; if (root.connected) root.loadAll(); }
+    }
+    readonly property string limitText: limitedUntil > Date.now()
+        ? "Spotify временно ограничил запросы, до " + new Date(limitedUntil).toLocaleString(Qt.locale("ru_RU"), "d MMMM HH:mm") : ""
 
     function api(method, path, body, cb, retried) {
+        if (isBlocked(path)) { if (cb) Qt.callLater(() => cb(429, null)); return; }
         const xhr = new XMLHttpRequest();
         xhr.onreadystatechange = () => {
             if (xhr.readyState !== XMLHttpRequest.DONE) return;
@@ -108,6 +140,7 @@ Singleton {
                 fetchToken(() => api(method, path, body, cb, true));
                 return;
             }
+            if (xhr.status === 429) block(path, parseInt(xhr.getResponseHeader("Retry-After")));
             let data = null;
             try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch (e) {}
             if (cb) cb(xhr.status, data);
@@ -143,6 +176,46 @@ Singleton {
         loadQueue();
     }
 
+    // ---- Library cache (~/.cache/afterglow/spotify.json): the library shows at
+    // once from disk, and the liked songs (thousands, dozens of requests) are only
+    // fetched again when Spotify reports a different count or newest song.
+
+    readonly property string cachePath: (Quickshell.env("XDG_CACHE_HOME") || Quickshell.env("HOME") + "/.cache") + "/afterglow/spotify.json"
+    property bool cacheLoaded: false
+    FileView {
+        id: cacheFile
+        path: root.cachePath
+        onLoaded: {
+            try {
+                const d = JSON.parse(text());
+                if (root.liked.length === 0) { root.liked = d.liked || []; root.likedTotal = root.liked.length; }
+                if (root.playlists.length === 0) root.playlists = d.playlists || [];
+                if (root.albums.length === 0) root.albums = d.albums || [];
+                if (!root.userId) root.userId = d.userId || "";
+                const now = Date.now(), b = {};
+                for (const k in (d.blocked || {})) if (d.blocked[k] > now) b[k] = d.blocked[k];
+                root.blocked = b;
+                root.limitedUntil = Math.max(0, ...Object.values(b));
+            } catch (e) {}
+            root.cacheLoaded = true;
+        }
+        onLoadFailed: root.cacheLoaded = true
+    }
+    Timer {
+        id: saveCache
+        interval: 2000
+        onTriggered: {
+            if (!root.connected) return;
+            mkCacheDir.running = true;
+        }
+    }
+    Process {
+        id: mkCacheDir
+        command: ["mkdir", "-p", root.cachePath.replace(/\/[^/]*$/, "")]
+        onExited: cacheFile.setText(JSON.stringify({ userId: root.userId, liked: root.liked, playlists: root.playlists,
+                                                      albums: root.albums, blocked: root.blocked }))
+    }
+
     // Follows Spotify's `next` links until everything is in (or `max` items).
     function pages(url, max, each, done) {
         let got = 0;
@@ -156,10 +229,12 @@ Singleton {
     }
 
     property string userId: ""
+    // Liked songs as one thing to play (the desktop app knows the short form).
+    readonly property string likedUri: userId ? "spotify:user:" + userId + ":collection" : "spotify:collection:tracks"
     property int likedTotal: 0
 
     function loadPlaylists() {
-        api("GET", "/me", null, (code, d) => { if (code === 200 && d) userId = d.id; });
+        if (!userId) api("GET", "/me", null, (code, d) => { if (code === 200 && d) { userId = d.id; saveCache.restart(); } });
         const all = [];
         pages("/me/playlists?limit=50", 500, items => {
             for (const p of items) {
@@ -174,7 +249,7 @@ Singleton {
                 });
             }
             return items.length;
-        }, () => playlists = all);
+        }, code => { if (code === 200) { playlists = all; saveCache.restart(); } });
     }
 
     // Saved albums.
@@ -189,7 +264,7 @@ Singleton {
                            image: a.images?.[1]?.url ?? a.images?.[0]?.url ?? "", uri: a.uri, count: a.total_tracks ?? 0 });
             }
             return items.length;
-        }, () => albums = all);
+        }, code => { if (code === 200) { albums = all; saveCache.restart(); } });
     }
 
     // Tracks of a playlist, album or the liked songs: cb(tracks) once all pages are in.
@@ -217,18 +292,31 @@ Singleton {
         });
     }
 
-    // All liked songs (up to 5000), in Spotify's order, newest first.
+    // All liked songs (up to 5000), in Spotify's order, newest first. One small
+    // request first: same count and same newest song as the cache, nothing to do.
+    // A failed load keeps what was there.
     function loadLiked() {
-        const all = [];
-        pages("/me/tracks?limit=50", 5000, items => {
-            for (const i of items) {
-                const t = trackFrom(i.track);
-                if (t) all.push(t);
-            }
-            // Show the first page at once, the rest when it is all in.
-            if (liked.length === 0) liked = all.slice();
-            return items.length;
-        }, () => { liked = all; likedTotal = all.length; });
+        if (!cacheLoaded) { Qt.callLater(loadLiked); return; }
+        api("GET", "/me/tracks?limit=1", null, (code, d) => {
+            if (code !== 200 || !d) return;
+            const newest = trackFrom(d.items?.[0]?.track)?.uri ?? "";
+            if (liked.length && d.total === liked.length && newest === liked[0]?.uri) return;
+            const all = [];
+            pages("/me/tracks?limit=50", 5000, items => {
+                for (const i of items) {
+                    const t = trackFrom(i.track);
+                    if (t) all.push(t);
+                }
+                // Nothing cached: show the first page at once, the rest when it is all in.
+                if (liked.length === 0) liked = all.slice();
+                return items.length;
+            }, code => {
+                if (code !== 200 && all.length < liked.length) return;
+                liked = all;
+                likedTotal = all.length;
+                saveCache.restart();
+            });
+        });
     }
 
     function loadQueue() {
@@ -246,8 +334,8 @@ Singleton {
 
     function open(pl) {
         if (pl.id === "liked") {
-            openList = { id: "liked", name: "Любимые треки", uri: userId ? "spotify:user:" + userId + ":collection" : "",
-                         tracks: liked, loading: false, message: "" };
+            openList = { id: "liked", name: "Любимые треки", uri: likedUri, tracks: liked, loading: false,
+                         message: liked.length ? "" : (limitText ? limitText + ". Включить их целиком можно кнопками выше." : "Любимых треков нет") };
             return;
         }
         openList = { id: pl.id, name: pl.name, uri: pl.uri, tracks: [], loading: true, message: "" };
@@ -283,7 +371,9 @@ Singleton {
         if (!contextUri) return;
         Queue.release();
         if (!connected) { playViaApp(contextUri); return; }
+        const t = ++playTicket;
         pickDevice(id => {
+            if (t !== playTicket) return;
             const dev = id ? "&device_id=" + id : "";
             api("PUT", "/me/player/shuffle?state=" + (shuffle ? "true" : "false") + dev, null,
                 () => sendPlay({ context_uri: contextUri }, contextUri));
@@ -314,22 +404,33 @@ Singleton {
 
     // PUT /me/player/play with `body`; without the app, or when Spotify reports no
     // active device, it is retried on a picked device; last resort is the app.
+    // Every step checks playTicket: once something else was asked to play (another
+    // track, or Afterglow's own player), a late step must not start Spotify.
+    property int playTicket: 0
+    function cancelPlay() {
+        playTicket++;
+        waiting = null;
+        devicePoll.stop();
+    }
     function sendPlay(body, fallbackUri) {
+        const t = playTicket;
+        const live = () => t === playTicket;
         const send = (dev, retry) => api("PUT", "/me/player/play" + (dev ? "?device_id=" + dev : ""), body, code => {
             if (code >= 200 && code < 300) { refresh.restart(); return; }
-            if (retry) pickDevice(id => id ? send(id, false) : launchAndPlay(body, fallbackUri));
+            if (!live()) return;
+            if (retry) pickDevice(id => { if (live()) id ? send(id, false) : launchAndPlay(body, fallbackUri); });
             else playViaApp(fallbackUri);
         });
         if (appRunning()) send("", true);
-        else pickDevice(id => id ? send(id, false) : launchAndPlay(body, fallbackUri));
+        else pickDevice(id => { if (live()) id ? send(id, false) : launchAndPlay(body, fallbackUri); });
     }
 
     // No Spotify device at all: start the desktop app, wait for it to register
     // as a device (up to ~20 s), then play there.
-    property var waiting: null   // { body, uri, tries }
+    property var waiting: null   // { body, uri, tries, ticket }
     function launchAndPlay(body, uri) {
         say("Запускаю Spotify…");
-        waiting = { body, uri, tries: 0 };
+        waiting = { body, uri, tries: 0, ticket: playTicket };
         launch.running = true;
         devicePoll.restart();
     }
@@ -346,7 +447,7 @@ Singleton {
             if (!w) { stop(); return; }
             if (++w.tries > 14) { stop(); root.waiting = null; root.say("Spotify не запустился"); return; }
             root.pickDevice(id => {
-                if (!id || root.waiting !== w) return;
+                if (!id || root.waiting !== w || w.ticket !== root.playTicket) return;
                 devicePoll.stop();
                 root.waiting = null;
                 root.api("PUT", "/me/player/play?device_id=" + id, w.body, code => {
@@ -360,6 +461,7 @@ Singleton {
     // Start a track, optionally inside its playlist so "next" continues there.
     function play(uri, contextUri) {
         if (!uri) return;
+        playTicket++;
         if (!connected) { playViaApp(uri); return; }
         sendPlay(contextUri ? { context_uri: contextUri, offset: { uri } } : { uris: [uri] }, uri);
     }
@@ -422,8 +524,8 @@ Singleton {
     }
 
     Timer {
-        running: root.connected && Player.isPlaying
-        interval: 30000
+        running: root.connected && Player.isPlaying && Player.source === "spotify"
+        interval: 60000
         repeat: true
         onTriggered: root.loadQueue()
     }

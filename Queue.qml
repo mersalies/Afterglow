@@ -155,11 +155,46 @@ Singleton {
             LocalPlayer.stop();
             Spotify.playTrack(t.uri);
         } else {
+            // A Spotify request still on its way must not start it later.
+            Spotify.cancelPlay();
             const sp = Player.playerFor("spotify");
             if (sp?.isPlaying) sp.pause();
+            quietUntil = Date.now() + 6000;
+            freshStart = true;
             LocalPlayer.load(t);
         }
         prefetchNext();
+    }
+
+    // Two players must never sound together. While Afterglow plays a track itself,
+    // Spotify starting within a few seconds of the hand-over (or of our track
+    // starting to sound) is Spotify's own autoplay or a late request: it is paused
+    // again. Later than that it is the user: they take over, our track stops.
+    property double quietUntil: 0
+    property bool freshStart: false
+    Connections {
+        target: LocalPlayer
+        function onIsPlayingChanged() {
+            if (LocalPlayer.isPlaying && root.freshStart) {
+                root.freshStart = false;
+                root.quietUntil = Math.max(root.quietUntil, Date.now() + 5000);
+            }
+        }
+    }
+    Timer {
+        running: LocalPlayer.isPlaying
+        interval: 400
+        repeat: true
+        onTriggered: {
+            const sp = Player.playerFor("spotify");
+            if (!sp?.isPlaying) return;
+            if (Date.now() < root.quietUntil) {
+                sp.pause();
+            } else {
+                LocalPlayer.stop();
+                root.release();
+            }
+        }
     }
 
     // Queue ran out: local playback stops; Spotify is left to carry on by itself.

@@ -64,47 +64,54 @@ Singleton {
             String(Cache.limitBytes(Config.audioCacheMB))];
     }
 
+    // One download process per track: a new track never reuses the process of
+    // the one before (its late answer would play the old file under the new name).
+    property var job: null
     function load(it) {
         if (media) { media.stop(); media.source = ""; }
+        if (job) job.running = false;
         item = it;
         status = "loading";
-        fetch.out = "";
-        fetch.forUri = it.uri;
-        fetch.retried = false;
-        fetch.command = fetchCommand(it.uri, false);
         // Already downloading in the background: wait for it instead of racing it.
         if (pre.running && pre.uri === it.uri) waitForPre = true;
-        else fetch.running = true;
+        else startFetch(it.uri, false);
     }
     property bool waitForPre: false
 
-    Process {
-        id: fetch
-        property string out: ""
-        property string forUri: ""
-        property string err: ""
-        property bool retried: false
-        stdout: SplitParser { onRead: line => fetch.out = line.trim() }
-        stderr: SplitParser { onRead: line => fetch.err = line }
-        onStarted: err = ""
-        onExited: code => {
-            if (forUri !== root.item?.uri) return;
-            if (code === 0 && out.startsWith("/")) {
-                root.status = "ready";
-                if (root.media) {
-                    root.media.source = "file://" + out;
-                    root.media.play();
+    function startFetch(uri, alt) {
+        job = fetchComp.createObject(root, { forUri: uri, retried: alt, command: fetchCommand(uri, alt) });
+        job.running = true;
+    }
+
+    Component {
+        id: fetchComp
+        Process {
+            id: fetch
+            property string out: ""
+            property string forUri: ""
+            property string err: ""
+            property bool retried: false
+            stdout: SplitParser { onRead: line => fetch.out = line.trim() }
+            stderr: SplitParser { onRead: line => fetch.err = line }
+            onExited: code => {
+                Qt.callLater(fetch.destroy);
+                if (root.job !== fetch) return;
+                root.job = null;
+                if (forUri !== root.item?.uri) return;
+                if (code === 0 && out.startsWith("/")) {
+                    root.status = "ready";
+                    if (root.media) {
+                        root.media.source = "file://" + out;
+                        root.media.play();
+                    }
+                } else if (!retried) {
+                    console.warn("Afterglow: audio fetch failed, retrying:", forUri, err);
+                    root.startFetch(forUri, true);
+                } else {
+                    console.warn("Afterglow: audio fetch failed:", forUri, err);
+                    root.status = "error";
+                    root.failed(err || "yt-dlp не смог получить звук");
                 }
-            } else if (!retried) {
-                console.warn("Afterglow: audio fetch failed, retrying:", forUri, err);
-                retried = true;
-                out = "";
-                command = root.fetchCommand(forUri, true);
-                running = true;
-            } else {
-                console.warn("Afterglow: audio fetch failed:", forUri, err);
-                root.status = "error";
-                root.failed(err || "yt-dlp не смог получить звук");
             }
         }
     }
@@ -129,7 +136,7 @@ Singleton {
         onExited: {
             if (root.waitForPre && uri === root.item?.uri) {
                 root.waitForPre = false;
-                fetch.running = true;   // the file is cached now: starts at once
+                root.startFetch(uri, false);   // the file is cached now: starts at once
             }
             next();
         }
@@ -142,7 +149,7 @@ Singleton {
 
     function stop() {
         waitForPre = false;
-        fetch.running = false;
+        if (job) job.running = false;
         if (media) { media.stop(); media.source = ""; }
         item = null;
         status = "idle";
