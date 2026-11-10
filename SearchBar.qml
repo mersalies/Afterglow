@@ -1,7 +1,7 @@
 import QtQuick
 
-// Entry to the queue builder above the transport bar: shows what is queued next
-// and opens the builder on click (or on Q / "/").
+// Entry to the search sheet above the transport bar: shows the search platform
+// and what is queued next; opens the sheet on click (or on Q / "/").
 Glass {
     id: root
 
@@ -12,13 +12,12 @@ Glass {
     implicitHeight: 44
     border.color: area.containsMouse ? Qt.rgba(1, 1, 1, 0.26) : Qt.rgba(1, 1, 1, 0.12)
 
-    Icon {
+    PlatformBadge {
         id: glass
-        x: 16
+        x: 10
         anchors.verticalCenter: parent.verticalCenter
-        kind: "search"
-        size: 18
-        color: Theme.textTertiary
+        platform: Catalog.platform
+        size: 26
     }
 
     Text {
@@ -30,7 +29,7 @@ Glass {
         elide: Text.ElideRight
         text: Queue.items.length > 0
             ? "Далее: " + Queue.items[0].title + (Queue.items[0].artist ? " — " + Queue.items[0].artist : "")
-            : "Найти и добавить в очередь: Spotify, YouTube, SoundCloud"
+            : "Поиск в " + Catalog.platformName(Catalog.platform)
         font.family: Theme.font
         font.pixelSize: 14
         color: Queue.items.length > 0 ? Theme.textSecondary : Theme.textTertiary

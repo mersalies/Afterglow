@@ -117,6 +117,8 @@ Singleton {
         if (current) recent.add(current.title + "\u0001" + current.artist);
         const pool = [];
         for (const t of Spotify.liked) pool.push(t);
+        for (const t of Accounts.ytmLiked) pool.push(t);
+        for (const t of Accounts.scLikes) pool.push(t);
         for (const h of History.tracks) if (h.source === "soundcloud" && h.uri) pool.push(h);
         const fresh = pool.filter(t => t.uri && !recent.has(t.title + "\u0001" + t.artist));
         const from = fresh.length ? fresh : pool;

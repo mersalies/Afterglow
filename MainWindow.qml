@@ -535,6 +535,7 @@ FloatingWindow {
                 id: builder
                 z: 70
                 anchors.fill: parent
+                sheetBottom: bar.y - 12
             }
 
             // Settings and glow menus open at the right edge of the window, just

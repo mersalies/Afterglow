@@ -4,7 +4,7 @@ import Quickshell
 import Quickshell.Io
 
 // Finds a music video for the current track on YouTube (via yt-dlp) and keeps a
-// muted 480p copy in ~/.cache/afterglow/clips for the backdrop. YouTube refuses
+// muted copy (480p by default, see clipQuality) in ~/.cache/afterglow/clips for the backdrop. YouTube refuses
 // direct playback of its stream URLs outside yt-dlp, so the clip is cached first.
 // Only uploads that look like real clips are picked automatically; the user can
 // step through other candidates, and the choice per track is remembered.
@@ -31,7 +31,9 @@ Singleton {
 
     readonly property string cacheDir: (Quickshell.env("XDG_CACHE_HOME") || Quickshell.env("HOME") + "/.cache") + "/afterglow"
     readonly property string clipsDir: cacheDir + "/clips"
-    readonly property string format: "bv*[height<=480][ext=mp4][vcodec^=avc1]/bv*[height<=480][ext=mp4]/bv*[height<=480]"
+    // Video only (the backdrop is muted), no taller than the chosen quality.
+    readonly property int quality: [144, 480, 720, 1080].includes(Config.clipQuality) ? Config.clipQuality : 480
+    readonly property string format: "bv*[height<=Q][ext=mp4][vcodec^=avc1]/bv*[height<=Q][ext=mp4]/bv*[height<=Q]/bv*".replace(/Q/g, quality)
 
     function keyFor(artist, title) { return title ? artist + "\u0001" + title : ""; }
 
@@ -131,14 +133,15 @@ Singleton {
 
     function fetchCommand(id) {
         return ["sh", "-c", Cache.pruneFn +
-            'dir="$1"; id="$2"; mkdir -p "$dir"; ' +
+            'dir="$1"; id="$2"; vid="$6"; mkdir -p "$dir"; ' +
             'f=$(ls "$dir/$id".* 2>/dev/null | grep -v "\\.part$" | head -1); ' +
-            'if [ -z "$f" ]; then yt-dlp --no-warnings -q ${4:+--cookies-from-browser "$4"} -N 8 --http-chunk-size 2M -f "$3" -o "$dir/$id.%(ext)s" "https://www.youtube.com/watch?v=$id" || exit 1; ' +
+            'if [ -z "$f" ]; then yt-dlp --no-warnings -q ${4:+--cookies-from-browser "$4"} -N 8 --http-chunk-size 2M -f "$3" -o "$dir/$id.%(ext)s" "https://www.youtube.com/watch?v=$vid" || exit 1; ' +
             'f=$(ls "$dir/$id".* 2>/dev/null | grep -v "\\.part$" | head -1); fi; ' +
             '[ -n "$f" ] || exit 1; touch "$f"; ' +
             'prune "$dir" "$5"; ' +
             'echo "$f"',
-            "sh", clipsDir, id, format, Config.youtubeCookies, String(Cache.limitBytes(Config.clipCacheMB))];
+            "sh", clipsDir, quality === 480 ? id : id + "-" + quality, format, Config.youtubeCookies,
+            String(Cache.limitBytes(Config.clipCacheMB)), id];
     }
 
     function use(c) {
@@ -151,6 +154,15 @@ Singleton {
         fetch.forKey = key;
         fetch.command = fetchCommand(c.id);
         fetch.running = true;
+    }
+
+    // A new quality applies to the clip on screen right away.
+    Connections {
+        target: Config
+        function onClipQualityChanged() {
+            if (root.videoId !== "" && root.status !== "searching")
+                root.use({ id: root.videoId, title: root.videoTitle, duration: root.videoDuration });
+        }
     }
 
     Process {

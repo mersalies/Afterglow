@@ -26,29 +26,59 @@ Glass {
     }
     Behavior on height { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
 
-    // Source pill
+    // Source pill: the service's badge on a tint of its colour, with a ring that
+    // breathes while it plays, so where the music comes from reads at a glance.
     Rectangle {
         id: sourceBtn
+        readonly property string key: Player.hasPlayer ? Player.source
+            : (Config.defaultPlayer || "")
+        readonly property color tone: Player.hasPlayer || Config.defaultPlayer ? Player.sourceColor(key) : Theme.textTertiary
         x: root.compact ? 6 : 10
         anchors.verticalCenter: parent.verticalCenter
         height: root.compact ? 40 : 44
-        width: root.compact ? 52 : sourceRow.implicitWidth + 28
+        width: root.compact ? 64 : sourceRow.implicitWidth + 26
         radius: height / 2
-        color: srcMouse.containsMouse ? Theme.pressed : Theme.hover
+        color: Qt.rgba(tone.r, tone.g, tone.b, srcMouse.containsMouse ? 0.34 : 0.2)
+        border.width: 1
+        border.color: Qt.rgba(tone.r, tone.g, tone.b, 0.55)
         Behavior on color { ColorAnimation { duration: Theme.quick } }
         Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
-        clip: true
 
         Row {
             id: sourceRow
             anchors.centerIn: parent
-            spacing: 8
-            Rectangle {
+            spacing: 7
+            Item {
                 anchors.verticalCenter: parent.verticalCenter
-                width: 10
-                height: 10
-                radius: 5
-                color: Player.hasPlayer ? Player.sourceColor(Player.source) : Theme.textTertiary
+                width: 28
+                height: 28
+                Rectangle {
+                    id: ring
+                    anchors.centerIn: parent
+                    width: 28
+                    height: 28
+                    radius: 14
+                    color: "transparent"
+                    border.width: 2
+                    border.color: sourceBtn.tone
+                    opacity: 0
+                    SequentialAnimation {
+                        running: Player.isPlaying
+                        loops: Animation.Infinite
+                        onRunningChanged: if (!running) { ring.opacity = 0; ring.scale = 1; }
+                        ParallelAnimation {
+                            NumberAnimation { target: ring; property: "scale"; from: 1; to: 1.55; duration: 1600; easing.type: Easing.OutCubic }
+                            NumberAnimation { target: ring; property: "opacity"; from: 0.7; to: 0; duration: 1600; easing.type: Easing.OutCubic }
+                        }
+                        PauseAnimation { duration: 600 }
+                    }
+                }
+                PlatformBadge {
+                    anchors.centerIn: parent
+                    platform: Player.local ? (Player.source || "afterglow") : sourceBtn.key
+                    size: 26
+                    opacity: Player.hasPlayer ? 1 : 0.6
+                }
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter

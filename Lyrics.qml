@@ -1,8 +1,10 @@
 pragma Singleton
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
-// Time-synced lyrics from LRCLIB (https://lrclib.net), matched to the MPRIS track.
+// Time-synced lyrics for the playing track: the user's own .lrc files first, then
+// LRCLIB (https://lrclib.net), NetEase Cloud Music and YouTube Music.
 Singleton {
     id: root
 
@@ -52,10 +54,14 @@ Singleton {
         status = entry.lines.length ? "ready" : "none";
     }
 
-    // LRCLIB lookups, most exact first; stops at the first synced hit:
-    //   1. exact match with album and duration   2. without album
-    //   3. field search (track + first artist)    4. free-text search on the cleaned title
-    // Search results are ranked by synced lyrics, then by closeness of duration.
+    readonly property string folder: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/afterglow/lyrics"
+    readonly property string ytmHelper: Quickshell.shellDir + "/lyrics-ytm.py"
+
+    // Sources in order; each calls back with { synced, plain } (LRC text, plain
+    // text, or empty). The first synced result wins; the first plain one is kept
+    // in case nothing synced turns up.
+    //   1. the user's own .lrc in ~/.local/share/afterglow/lyrics (always wins)
+    //   2. LRCLIB   3. NetEase Cloud Music   4. YouTube Music (unofficial)
     function load() {
         const k = key;
         if (k === "") { apply({ lines: [], synced: false }); status = "idle"; return; }
@@ -63,46 +69,160 @@ Singleton {
 
         status = "loading";
         lines = [];
-        const artist = Player.artist, title = Player.title, album = Player.album, len = Player.length;
-        const first = artist.split(/,|&| feat\.?| ft\.?| x /i)[0].trim();
-        const clean = cleanTitle(title);
-        const enc = encodeURIComponent;
-        const base = "https://lrclib.net/api/";
-
-        const pick = list => {
-            if (!Array.isArray(list) || !list.length) return null;
-            const near = x => len > 0 && x.duration ? Math.abs(x.duration - len) : 0;
-            const ok = list.filter(x => !len || !x.duration || near(x) < 12);
-            ok.sort((a, b) => (!!b.syncedLyrics - !!a.syncedLyrics) || (near(a) - near(b)));
-            return ok[0] ?? null;
+        const t = {
+            artist: Player.artist, title: Player.title, album: Player.album, len: Player.length,
+            first: Player.artist.split(/\/|,|&| feat\.?| ft\.?| x /i)[0].trim(),
+            clean: cleanTitle(Player.title)
         };
+        const sources = [fromFolder, fromLrclib, fromNetease, fromYoutubeMusic];
 
-        const steps = [];
-        if (album && len > 0) steps.push(base + "get?artist_name=" + enc(artist) + "&track_name=" + enc(title) + "&album_name=" + enc(album) + "&duration=" + Math.round(len));
-        steps.push(base + "get?artist_name=" + enc(first) + "&track_name=" + enc(clean) + (len > 0 ? "&duration=" + Math.round(len) : ""));
-        steps.push(base + "search?track_name=" + enc(clean) + "&artist_name=" + enc(first));
-        steps.push(base + "search?q=" + enc(clean + " " + first));
-
-        let fallback = null;   // plain lyrics, kept in case nothing synced turns up
+        let fallback = "";
         const next = i => {
             if (k !== root.key) return;
-            if (i >= steps.length) { finish(k, fallback); return; }
-            request(steps[i], (ok, data) => {
+            if (i >= sources.length) { finish(k, "", fallback); return; }
+            sources[i](t, res => {
                 if (k !== root.key) return;
-                const hit = Array.isArray(data) ? pick(data) : (ok ? data : null);
-                if (hit?.syncedLyrics) { finish(k, hit); return; }
-                if (hit?.plainLyrics && !fallback) fallback = hit;
+                if (res?.synced) { finish(k, res.synced, ""); return; }
+                if (res?.plain && !fallback) fallback = res.plain;
+                // A plain file of the user's own beats anything found online.
+                if (i === 0 && fallback) { finish(k, "", fallback); return; }
                 next(i + 1);
             });
         };
         next(0);
     }
 
-    function finish(k, data) {
+    // Lowercase letters and digits only, so "Artist - Title (Live).lrc" and the
+    // player's tags compare equal.
+    function norm(s) {
+        return (s || "").toLowerCase().replace(/ё/g, "е").replace(/[\s.,'"`’!?¿¡()\[\]{}\-–—_&:;\/\\|+*#@$%^~<>=]+/g, "");
+    }
+
+    // ---- 1. Own files: "Artist - Title.lrc" or "Title.lrc", any case, subfolders too.
+    // A file without time stamps counts as plain lyrics.
+    function fromFolder(t, done) {
+        folderScan.want = [norm(t.artist + t.title), norm(t.first + t.title), norm(t.first + t.clean),
+                           norm(t.title), norm(t.clean)];
+        folderScan.done = done;
+        folderScan.running = false;
+        folderScan.running = true;
+    }
+    Process {
+        id: folderScan
+        property var want: []
+        property var done: null
+        command: ["sh", "-c", 'mkdir -p "$1"; find -L "$1" -maxdepth 3 -type f \\( -iname "*.lrc" -o -iname "*.txt" \\)', "sh", root.folder]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const files = text.split("\n").filter(f => f);
+                const name = f => root.norm(f.slice(f.lastIndexOf("/") + 1).replace(/\.(lrc|txt)$/i, ""));
+                let hit = "";
+                for (const w of folderScan.want) {
+                    hit = files.find(f => name(f) === w) || "";
+                    if (hit) break;
+                }
+                const cb = folderScan.done;
+                if (!hit) { cb(null); return; }
+                folderRead.done = cb;
+                folderRead.command = ["cat", hit];
+                folderRead.running = true;
+            }
+        }
+    }
+    Process {
+        id: folderRead
+        property var done: null
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const lrc = /\[\d+:\d+(\.\d+)?\]/.test(text);
+                folderRead.done(lrc ? { synced: text } : { plain: text });
+            }
+        }
+    }
+
+    // ---- 2. LRCLIB, most exact first:
+    //   exact match with album and duration, without album, field search
+    //   (track + first artist), free-text search. Results ranked by synced
+    //   lyrics, then by closeness of duration.
+    function fromLrclib(t, done) {
+        const enc = encodeURIComponent;
+        const base = "https://lrclib.net/api/";
+        const pick = list => {
+            if (!Array.isArray(list) || !list.length) return null;
+            const near = x => t.len > 0 && x.duration ? Math.abs(x.duration - t.len) : 0;
+            const ok = list.filter(x => !t.len || !x.duration || near(x) < 12);
+            ok.sort((a, b) => (!!b.syncedLyrics - !!a.syncedLyrics) || (near(a) - near(b)));
+            return ok[0] ?? null;
+        };
+        const steps = [];
+        if (t.album && t.len > 0) steps.push(base + "get?artist_name=" + enc(t.artist) + "&track_name=" + enc(t.title) + "&album_name=" + enc(t.album) + "&duration=" + Math.round(t.len));
+        steps.push(base + "get?artist_name=" + enc(t.first) + "&track_name=" + enc(t.clean) + (t.len > 0 ? "&duration=" + Math.round(t.len) : ""));
+        steps.push(base + "search?track_name=" + enc(t.clean) + "&artist_name=" + enc(t.first));
+        steps.push(base + "search?q=" + enc(t.clean + " " + t.first));
+
+        let plain = "";
+        const next = i => {
+            if (i >= steps.length) { done({ plain: plain }); return; }
+            request(steps[i], (ok, data) => {
+                const hit = Array.isArray(data) ? pick(data) : (ok ? data : null);
+                if (hit?.syncedLyrics) { done({ synced: hit.syncedLyrics }); return; }
+                if (hit?.plainLyrics && !plain) plain = hit.plainLyrics;
+                next(i + 1);
+            });
+        };
+        next(0);
+    }
+
+    // ---- 3. NetEase Cloud Music: big catalogue with synced lyrics, also for
+    // Russian and Asian music. Its search is loose, so a hit must match the first
+    // artist, the title and (when known) the duration.
+    function fromNetease(t, done) {
+        const a = norm(t.first), c = norm(t.clean);
+        if (!a || !c) { done(null); return; }
+        const q = encodeURIComponent(t.first + " " + t.clean);
+        request("https://music.163.com/api/search/get?type=1&limit=10&s=" + q, (ok, data) => {
+            const songs = ok ? (data?.result?.songs ?? []) : [];
+            const song = songs.find(s => {
+                const name = norm(s.name), artists = norm((s.artists || []).map(x => x.name).join(""));
+                const len = (s.duration || 0) / 1000;
+                return artists.includes(a) && (name === c || name.startsWith(c) || c.startsWith(name) && name.length > 2)
+                    && (!t.len || !len || Math.abs(len - t.len) < 12);
+            });
+            if (!song) { done(null); return; }
+            request("https://music.163.com/api/song/lyric?lv=1&id=" + song.id, (ok2, lyr) => {
+                const text = ok2 ? (lyr?.lrc?.lyric ?? "") : "";
+                // Drop the credit lines NetEase puts first ("作词 : …", "作曲 : …").
+                const body = text.split("\n").filter(l => !/^\s*(\[[^\]]*\])+\s*[一-鿿]+\s*[:：]/.test(l)).join("\n");
+                if (/\[\d+:\d+(\.\d+)?\]\s*\S/.test(body)) done({ synced: body });
+                else done(null);
+            });
+        });
+    }
+
+    // ---- 4. YouTube Music through lyrics-ytm.py: often has Russian lyrics,
+    // synced when the app shows them in time. Unofficial, may stop working.
+    function fromYoutubeMusic(t, done) {
+        ytm.done = done;
+        ytm.command = ["python3", "-I", root.ytmHelper, t.artist, t.title];
+        ytm.running = false;
+        ytm.running = true;
+    }
+    Process {
+        id: ytm
+        property var done: null
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const lrc = /^\[\d+:\d+(\.\d+)?\]/m.test(text);
+                ytm.done(text.trim() === "" ? null : lrc ? { synced: text } : { plain: text });
+            }
+        }
+    }
+
+    function finish(k, synced, plain) {
         let entry = { lines: [], synced: false };
-        if (data?.syncedLyrics) entry = { lines: parseLrc(data.syncedLyrics), synced: true };
-        else if (data?.plainLyrics) entry = {
-            lines: data.plainLyrics.split("\n").filter(l => l.trim() !== "").map(t => ({ time: 0, text: t })),
+        if (synced) entry = { lines: parseLrc(synced), synced: true };
+        else if (plain) entry = {
+            lines: plain.split("\n").filter(l => l.trim() !== "").map(t => ({ time: 0, text: t })),
             synced: false
         };
         cache[k] = entry;

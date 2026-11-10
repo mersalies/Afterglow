@@ -11,7 +11,7 @@ Item {
 
     // Animation style: the user's pick, or with "auto" a different one for every
     // phrase (never the same twice in a row). `style` is the current phrase's.
-    readonly property var styles: ["fly", "extrude", "crumble", "wave", "glitch", "neon", "bounce"]
+    readonly property var styles: ["fly", "extrude", "crumble", "wave", "glitch", "neon", "bounce", "ball"]
     property string style: "fly"
     function pickStyle() {
         if (Config.lyricsStyle !== "auto" && styles.includes(Config.lyricsStyle)) return Config.lyricsStyle;
@@ -109,6 +109,34 @@ Item {
         LyricStage {}
     }
 
+    // The ball: a lens over the whole stage bulges the stack of words. It follows
+    // the current phrase's block and swells a little on kicks.
+    Item {
+        id: lens
+        anchors.fill: parent
+        readonly property bool on: root.style === "ball" && root.stage !== null && root.stage.layout.halfW !== undefined
+        property real kick: 0
+        NumberAnimation on kick { id: lensKick; to: 0; duration: 420; easing.type: Easing.OutCubic; running: false }
+        Connections {
+            target: Audio
+            function onKicked(strength) { lens.kick = Math.min(1, strength); lensKick.restart(); }
+        }
+        property real ballW: on ? root.stage.layout.halfW * 1.22 + 30 : 200
+        property real ballH: on ? root.stage.layout.halfH * 1.12 + 30 : 200
+        property real ballY: on ? (root.stage.layout.top + root.stage.layout.bottom) / 2 : height / 2
+        Behavior on ballW { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
+        Behavior on ballH { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
+        Behavior on ballY { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
+
+        layer.enabled: on
+        layer.effect: ShaderEffect {
+            property size size: Qt.size(lens.width, lens.height)
+            property point center: Qt.point(lens.width / 2, lens.ballY)
+            property size radius: Qt.size(lens.ballW, lens.ballH)
+            property real strength: 0.62 + 0.18 * lens.kick
+            fragmentShader: Qt.resolvedUrl("shaders/bulge.frag.qsb")
+        }
+
     Item {
         id: stages
         anchors.fill: parent
@@ -129,6 +157,7 @@ Item {
             shadowScale: stages.neon ? 1.02 + 0.04 * stages.bass : 1
             blurMax: stages.neon ? 48 : 24
         }
+    }
     }
 
     // Artist under the title when the title holds the stage.

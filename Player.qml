@@ -19,6 +19,11 @@ Singleton {
         }
         const playing = ps.find(p => p.isPlaying);
         if (playing) return playing;
+        // Nothing plays: the default player from the settings, when it is open.
+        if (Config.defaultPlayer) {
+            const fav = ps.find(p => sourceKey(p) === Config.defaultPlayer);
+            if (fav) return fav;
+        }
         if (last && ps.includes(last)) return last;
         return ps[0] ?? null;
     }
@@ -121,6 +126,22 @@ Singleton {
     function toggle() {
         if (local) LocalPlayer.toggle();
         else if (active?.canTogglePlaying) active.togglePlaying();
+        else if (!active) startDefault();
+    }
+
+    // Play with no player around: start the default one from the settings.
+    readonly property var defaultPages: ({
+        "youtube-music": "https://music.youtube.com", "yandex": "https://music.yandex.ru",
+        "vk": "https://vk.com/audio", "soundcloud": "https://soundcloud.com", "apple": "https://music.apple.com"
+    })
+    function startDefault() {
+        const d = Config.defaultPlayer;
+        if (d === "spotify") {
+            if (Spotify.connected) Spotify.launchAndPlay(null, "");
+            else Qt.openUrlExternally("spotify:");
+        }
+        else if (defaultPages[d]) Qt.openUrlExternally(defaultPages[d]);
+        else Queue.resume();
     }
     // While Afterglow's queue runs, next/previous walk the queue, not the player's own list.
     function next() {

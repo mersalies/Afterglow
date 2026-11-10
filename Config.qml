@@ -41,6 +41,10 @@ Singleton {
     property alias backdropBlur: adapter.backdropBlur
     property alias panelOpacity: adapter.panelOpacity
     property alias menuOpacity: adapter.menuOpacity
+    property alias defaultPlayer: adapter.defaultPlayer
+    property alias clipQuality: adapter.clipQuality
+    property alias soundcloudUser: adapter.soundcloudUser
+    property alias searchPlatform: adapter.searchPlatform
 
     // yt-dlp arguments that let YouTube see a signed-in browser (see youtubeCookies).
     function ytCookieArgs() {
@@ -117,6 +121,14 @@ Singleton {
             // Background opacity of the left panel and of the menus (0-1).
             property real panelOpacity: 1.0
             property real menuOpacity: 1.0
+            // Player to show and start when nothing plays ("" = whichever was last).
+            property string defaultPlayer: ""
+            // Height of the music-video backdrop: 144, 480, 720 or 1080.
+            property int clipQuality: 480
+            // Public SoundCloud profile (soundcloud.com/<name>) whose likes join the library.
+            property string soundcloudUser: ""
+            // Where the search looks: spotify, youtube-music, soundcloud, youtube.
+            property string searchPlatform: "youtube-music"
             property bool showLyrics: true
             property bool showLibrary: true
             // "lyrics" (words on the centre stage) or "covers" (carousel)

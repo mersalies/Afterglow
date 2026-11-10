@@ -12,6 +12,8 @@ import QtQuick.Effects
 //   glitch   RGB-split letters that twitch on kicks; smear sideways at the end
 //   neon     letters flicker on like a sign, glow pulses with the bass
 //   bounce   words drop in with a bounce, squash on kicks, fall out
+//   ball     a stack of words, each row filling the width, printed on a ball:
+//            the lens in KineticLyrics bulges it; it rolls in and rolls away
 Item {
     id: stage
 
@@ -42,7 +44,63 @@ Item {
     FontMetrics { id: fm; font.family: Theme.display; font.pixelSize: 100 }
     readonly property real tracking: 0.04   // em
 
-    readonly property var layout: {
+    readonly property var layout: style === "ball" ? ballLayout : rowLayout
+
+    // Ball: a narrow stack. Words join a row while it stays short ("be up"), and
+    // every row is scaled to the same width, so short words come out huge.
+    readonly property var ballLayout: {
+        if (style !== "ball") return null;
+        const space = fm.advanceWidth(" ") / 100;
+        const unit = words.map(w => fm.advanceWidth(w) / 100 + Math.max(0, Array.from(w).length - 1) * tracking);
+        const rows = [];
+        words.forEach((w, i) => {
+            const last = rows[rows.length - 1];
+            if (last && last.chars + 1 + Array.from(w).length <= 7) {
+                last.items.push(i);
+                last.chars += 1 + Array.from(w).length;
+                last.w += space + unit[i];
+            } else {
+                rows.push({ items: [i], chars: Array.from(w).length, w: unit[i] });
+            }
+        });
+        const blockW = Math.min(width * 0.5, maxFont * 4.4);
+        const big = maxFont * 1.7;
+        rows.forEach(r => r.fs = Math.min(big, blockW / Math.max(0.01, r.w)));
+        // Stack rows by the ink of their letters (not the font box), so "my" sits
+        // as close under "that's" as "favorite" does, and descenders never touch
+        // the row below.
+        const asc = fm.ascent / 100;
+        rows.forEach(r => {
+            const ink = fm.tightBoundingRect(r.items.map(i => words[i]).join(" "));
+            r.inkTop = ink.y / 100;                  // above the baseline: negative
+            r.inkBottom = (ink.y + ink.height) / 100;
+        });
+        const gapOf = r => r.fs * 0.06;
+        const stackH = () => rows.reduce((h, r, ri) => h + (r.inkBottom - r.inkTop) * r.fs + (ri ? gapOf(r) : 0), 0);
+        const fit = Math.min(1, height * 0.8 / Math.max(1, stackH()));
+        rows.forEach(r => r.fs = Math.max(20, r.fs * fit));
+        const blockH = stackH();
+        const top = (height - blockH) / 2;
+        const pos = [];
+        let y = top;
+        rows.forEach((r, ri) => {
+            if (ri) y += gapOf(r);
+            // Text item top = ink top - (ascent + inkTop) in px.
+            const itemY = y - (asc + r.inkTop) * r.fs;
+            let x = (width - r.w * r.fs) / 2;
+            for (const i of r.items) {
+                pos[i] = { x, y: itemY, fs: r.fs, row: ri };
+                x += (unit[i] + space) * r.fs;
+            }
+            y += (r.inkBottom - r.inkTop) * r.fs;
+        });
+        const widest = Math.max(...rows.map(r => r.w * r.fs), 1);
+        return { size: rows.length ? rows[0].fs : maxFont, pos, top, bottom: top + blockH, radius: 0,
+                 halfW: widest / 2, halfH: blockH / 2 };
+    }
+
+    readonly property var rowLayout: {
+        if (style === "ball") return null;
         const maxW = width * 0.86;
         const space = fm.advanceWidth(" ") / 100;
         // Width at 1px, with a little extra tracking so curved letters never touch.
@@ -84,9 +142,10 @@ Item {
         words.forEach((w, wi) => {
             const p = layout.pos[wi];
             if (!p) return;
+            const fs = p.fs ?? size;
             let pre = "";
             for (const ch of Array.from(w)) {
-                out.push({ ch, wi, x: p.x + (fm.advanceWidth(pre) / 100 + Array.from(pre).length * tracking) * size, y: p.y });
+                out.push({ ch, wi, row: p.row ?? 0, fs, x: p.x + (fm.advanceWidth(pre) / 100 + Array.from(pre).length * tracking) * fs, y: p.y });
                 pre += ch;
             }
         });
@@ -118,12 +177,12 @@ Item {
 
     // ---- Per-style timing
 
-    readonly property var enterMs: ({ fly: 700, extrude: 420, crumble: 380, wave: 600, glitch: 320, neon: 900, bounce: 760 })
-    readonly property var exitMs: ({ fly: 600, extrude: 950, crumble: 1100, wave: 650, glitch: 420, neon: 650, bounce: 620 })
+    readonly property var enterMs: ({ fly: 700, extrude: 420, crumble: 380, wave: 600, glitch: 320, neon: 900, bounce: 760, ball: 640 })
+    readonly property var exitMs: ({ fly: 600, extrude: 950, crumble: 1100, wave: 650, glitch: 420, neon: 650, bounce: 620, ball: 620 })
     readonly property int enterDuration: enterMs[style] ?? 700
     readonly property int exitDuration: exitMs[style] ?? 600
     readonly property int enterEasing: ({ fly: Easing.OutExpo, extrude: Easing.OutBack, crumble: Easing.OutCubic, wave: Easing.OutCubic,
-                                          glitch: Easing.Linear, neon: Easing.Linear, bounce: Easing.OutBounce })[style] ?? Easing.OutExpo
+                                          glitch: Easing.Linear, neon: Easing.Linear, bounce: Easing.OutBounce, ball: Easing.OutBack })[style] ?? Easing.OutExpo
     readonly property int exitEasing: ({ fly: Easing.InCubic, extrude: Easing.OutCubic, crumble: Easing.InQuad, wave: Easing.InCubic,
                                          glitch: Easing.InCubic, neon: Easing.Linear, bounce: Easing.InQuad })[style] ?? Easing.InCubic
 
@@ -135,6 +194,7 @@ Item {
         case "glitch": return 100 + Math.abs(L.r1) * 260;
         case "neon": return 80;
         case "bounce": return 140 + L.d.wi * 90;
+        case "ball": return 90 + L.d.row * 110 + L.index * 6;
         default: return 160 + L.d.wi * 60;
         }
     }
@@ -144,6 +204,7 @@ Item {
         case "wave": return L.index * 14;
         case "bounce": return L.d.wi * 40;
         case "fly": return L.d.wi * 20;
+        case "ball": return L.d.row * 45;
         default: return 0;
         }
     }
@@ -224,6 +285,22 @@ Item {
             if (o > 0) { dy += 320 * o * o; op *= 1 - o; rot = L.w1 * 20 * o; }
             break;
         }
+        case "ball": {
+            // Rolls in from the left turning over, drifts slowly across the lens
+            // (which reads as the ball turning), bumps on kicks, rolls off right.
+            const unit = L.d.fs;
+            dx = -unit * 1.6 * e + Math.sin(t * 0.55) * unit * 0.12;
+            ry = -80 * e;
+            sc = Math.max(0, i) * (1 + L.pop * 0.08 + k * 0.05);
+            op = Math.min(1, i * 2);
+            if (o > 0) {
+                dx += unit * 2.4 * o * o;
+                ry += 70 * o;
+                sc *= 1 - 0.4 * o;
+                op *= 1 - o;
+            }
+            break;
+        }
         default: { // fly
             dx = L.w1 * 60 * e;
             dy = (40 + L.w2 * 30) * e;
@@ -247,7 +324,7 @@ Item {
         // turns with the surface under it (Y by longitude, X by latitude); the
         // projected spacing shrinks by the same cos() as the turned letters, so they
         // never crowd. Outer rows narrow like a drum, and the middle swells a little.
-        if (sphere && layout.radius > 0) {
+        if (sphere && style !== "ball" && layout.radius > 0) {
             const k = 0.7;                                     // curvature
             const R = layout.radius;
             const px = L.d.x + L.width / 2 - width / 2;
@@ -268,6 +345,8 @@ Item {
         return { dx, dy, sc, rot, rx, ry, op, blur };
     }
 
+    // First row of the ball in a warm tint of the cover colour.
+    readonly property color warm: Qt.tint(Qt.lighter(Player.accent, 1.8), Qt.rgba(1, 0.85, 0.35, 0.45))
     readonly property color dim: Qt.rgba(Qt.lighter(Player.accent, 1.5).r, Qt.lighter(Player.accent, 1.5).g, Qt.lighter(Player.accent, 1.5).b, 0.55)
 
     // ---- Letters
@@ -279,7 +358,7 @@ Item {
             id: letter
             required property int index
 
-            readonly property var d: stage.letters[index] ?? { ch: "", wi: 0, x: 0, y: 0 }
+            readonly property var d: stage.letters[index] ?? { ch: "", wi: 0, row: 0, fs: 0, x: 0, y: 0 }
             readonly property bool lit: !stage.timed || Lyrics.now >= (stage.times[d.wi] ?? 0)
             // per-letter and per-word randoms in -1..1
             readonly property real r1: stage.rnd(index * 1.7 + 1) * 2 - 1
@@ -402,8 +481,8 @@ Item {
                     id: glyph
                     text: letter.d.ch
                     font.family: Theme.display
-                    font.pixelSize: stage.layout.size
-                    color: letter.lit ? "white"
+                    font.pixelSize: letter.d.fs ?? stage.layout.size
+                    color: letter.lit ? (stage.style === "ball" && letter.d.row === 0 && stage.letters.length > 4 ? stage.warm : "white")
                         : stage.style === "extrude" ? Qt.lighter(Player.accent, 1.7)
                         : stage.dim
                     Behavior on color { ColorAnimation { duration: 220 } }
