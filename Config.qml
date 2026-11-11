@@ -67,6 +67,14 @@ Singleton {
     property alias clockClipX: adapter.clockClipX
     property alias clockClipY: adapter.clockClipY
 
+    // The three looks of the window, in the order the mode button steps through.
+    readonly property var views: [["lyrics", "Текст"], ["covers", "Обложки"], ["stage", "Сцена"]]
+    function viewName(v) { return (views.find(x => x[0] === v) ?? views[0])[1]; }
+    function cycleView() {
+        view = views[(Math.max(0, views.findIndex(x => x[0] === view)) + 1) % views.length][0];
+        Spotify.say("Режим: " + viewName(view));
+    }
+
     function resetClock() {
         clockScale = 1; clockLayer = "back"; clockFill = "auto"; clockColor = "#ffffff"; clockColor2 = "accent";
         clockAngle = 90; clockOutline = 0; clockOutlineColor = "#000000"; clockOutlineColor2 = "accent";
@@ -190,7 +198,8 @@ Singleton {
             property real clockClipY: -1
             property bool showLyrics: true
             property bool showLibrary: true
-            // "lyrics" (words on the centre stage) or "covers" (carousel)
+            // "lyrics" (words on the centre stage), "covers" (carousel with panels) or
+            // "stage" (bare carousel and controls straight on the backdrop)
             property string view: "lyrics"
             // "auto" or a source key from Player.sourceKey() ("spotify", "yandex", "youtube-music", ...)
             property string source: "auto"

@@ -26,6 +26,8 @@ Item {
     property real dockY: height - 160
     property real dockW: 520
     property real dockH: 44
+    // No bar while closed (the stage view opens the sheet from a round button).
+    property bool dockHidden: false
 
     function show(text) {
         open = true;
@@ -570,6 +572,9 @@ Item {
         Behavior on color { ColorAnimation { duration: 260 } }
         border.color: !root.open && barHover.hovered ? Qt.rgba(1, 1, 1, 0.26) : Qt.rgba(1, 1, 1, 0.12)
         clip: true
+        opacity: root.open || !root.dockHidden ? 1 : 0
+        visible: opacity > 0.01
+        Behavior on opacity { NumberAnimation { duration: 220 } }
 
         HoverHandler { id: barHover }
         // Swallow clicks so they do not reach the catcher behind.

@@ -11,6 +11,7 @@ Item {
 
     property real size: 140
     property bool tall: false
+    property bool accented: false   // tall digits in the cover's colour (the stage view)
     property date now: new Date()
 
     readonly property real stretch: tall ? 2.1 : 1
@@ -18,7 +19,7 @@ Item {
 
     // "accent" is the cover's colour; anything else a colour name or #rrggbb.
     function tone(v) { return v === "accent" ? Qt.lighter(Player.accent, 1.25) : (v || "#ffffff"); }
-    property color autoColor: tall ? Qt.tint(Qt.rgba(0.95, 0.95, 0.97, 0.86), Qt.rgba(Player.accent.r, Player.accent.g, Player.accent.b, 0.12))
+    property color autoColor: tall && !accented ? Qt.tint(Qt.rgba(0.95, 0.95, 0.97, 0.86), Qt.rgba(Player.accent.r, Player.accent.g, Player.accent.b, 0.12))
                                    : Qt.lighter(Player.accent, 1.25)
     Behavior on autoColor { ColorAnimation { duration: Theme.slow * 2 } }
     readonly property color fill1: Config.clockFill === "auto" ? autoColor : tone(Config.clockColor)
@@ -58,6 +59,7 @@ Item {
         font.pixelSize: root.tall ? Math.max(12, root.size * 0.1) : Math.max(13, root.size * 0.11)
         font.weight: root.tall ? Font.DemiBold : Font.Medium
         color: Theme.textSecondary
+        opacity: root.accented ? 0 : 1      // the stage shows the digits alone
         style: root.line > 0 ? Text.Outline : Text.Normal
         styleColor: Qt.rgba(root.line1.r, root.line1.g, root.line1.b, 0.7)
     }

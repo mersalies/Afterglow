@@ -47,7 +47,7 @@ FloatingWindow {
                 Spotify.say("Анимация: " + styleMenu.entries.find(x => x[0] === Config.lyricsStyle)[1]);
             }
             else if (e.key === Qt.Key_Q || e.key === Qt.Key_Slash) builder.show("");
-            else if (e.key === Qt.Key_V) Config.view = Config.view === "covers" ? "lyrics" : "covers";
+            else if (e.key === Qt.Key_V) Config.cycleView();
             else return;
             e.accepted = true;
         }
@@ -237,19 +237,24 @@ FloatingWindow {
             anchors.fill: parent
             visible: !win.compact
 
-            readonly property bool lyricsView: Config.view !== "covers"
+            // Three looks: "lyrics" (words in the centre), "covers" (carousel between
+            // panels), "stage" (bare carousel and controls on the backdrop).
+            readonly property bool stage: Config.view === "stage"
+            readonly property bool lyricsView: !stage && Config.view !== "covers"
+            // Library and clock float without a sheet, the library leaning in.
+            readonly property bool floatSide: lyricsView || stage
             readonly property int m: 20
             readonly property bool narrow: width < 900
             readonly property real libW: 320
             readonly property bool libDocked: Config.showLibrary && !narrow
             readonly property real lyrW: Math.min(400, width * 0.26)
-            readonly property bool lyrShown: !lyricsView && Config.showLyrics && Player.hasPlayer
+            readonly property bool lyrShown: !floatSide && Config.showLyrics && Player.hasPlayer
                 && (Lyrics.status === "ready" || Lyrics.status === "loading")
                 && width >= (libDocked ? 1240 : 900)
             readonly property real cx0: libDocked ? m + libW + (lyricsView ? 40 : 16) : m
             readonly property real cx1: lyrShown ? width - m - lyrW - 16 : width - m
             readonly property real panelBottom: search.y - 16
-            property real tilt: lyricsView ? 16 : 0
+            property real tilt: floatSide ? 16 : 0
             Behavior on tilt { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
 
             component Ease: NumberAnimation { duration: 520; easing.type: Easing.OutCubic }
@@ -305,17 +310,20 @@ FloatingWindow {
             readonly property real clockFx: Config["clock" + scene + "X"]
             readonly property real clockFy: Config["clock" + scene + "Y"]
             readonly property bool clockPlaced: clockFx >= 0 && clockFy >= 0
-            readonly property real clockAutoX: lyricsView ? (libDocked ? dockX : m) + (dockW - clock.width) / 2
+            readonly property real clockAutoX: stage ? (width - clock.width) / 2
+                : lyricsView ? (libDocked ? dockX : m) + (dockW - clock.width) / 2
                 : cx0 + (cx1 - cx0 - clock.width) / 2
-            readonly property real clockAutoY: lyricsView ? height * 0.03 : m
+            readonly property real clockAutoY: stage ? height * 0.012 : lyricsView ? height * 0.03 : m
             // The docked library hangs under the clock while the lyrics scene keeps it in place.
             readonly property bool libUnderClock: Config.clockShowLyrics && !(Config.clockLyricsX >= 0 && Config.clockLyricsY >= 0)
 
             Clock {
                 id: clock
                 z: Config.clockLayer === "front" ? 48 : 0
-                tall: full.lyricsView
-                size: (full.lyricsView ? Math.max(60, Math.min(170, full.height * 0.15))
+                tall: full.floatSide
+                accented: full.stage
+                size: (full.stage ? Math.max(60, Math.min(210, full.height * 0.16))
+                       : full.lyricsView ? Math.max(60, Math.min(170, full.height * 0.15))
                                        : Math.max(56, Math.min(170, full.height * 0.15))) * Math.max(0.4, Math.min(2.5, Config.clockScale))
                 x: full.clockPlaced ? full.clockFx * Math.max(0, full.width - width) : full.clockAutoX
                 y: full.clockPlaced ? full.clockFy * Math.max(0, full.height - height) : full.clockAutoY
@@ -329,7 +337,7 @@ FloatingWindow {
                     origin.x: 0
                     origin.y: clock.height / 2
                     axis { x: 0; y: 1; z: 0 }
-                    angle: full.libDocked && !full.clockPlaced ? full.tilt : 0
+                    angle: full.libDocked && !full.clockPlaced && !full.stage ? full.tilt : 0
                     distanceToPlane: 1200
                 }
 
@@ -369,8 +377,8 @@ FloatingWindow {
             Item {
                 id: coversView
                 anchors.fill: parent
-                opacity: full.lyricsView ? 0 : 1
-                scale: full.lyricsView ? 0.94 : 1
+                opacity: full.floatSide ? 0 : 1
+                scale: full.floatSide ? 0.94 : 1
                 visible: opacity > 0.01
                 Behavior on opacity { Ease {} }
                 Behavior on scale { Ease {} }
@@ -462,6 +470,25 @@ FloatingWindow {
                 Behavior on scale { NumberAnimation { duration: 420; easing.type: Easing.OutCubic } }
             }
 
+            // ---- stage view
+            Loader {
+                id: stageDeck
+                anchors.fill: parent
+                active: full.stage || opacity > 0.01
+                opacity: full.stage ? 1 : 0
+                scale: full.stage ? 1 : 1.04
+                visible: opacity > 0.01
+                Behavior on opacity { Ease {} }
+                Behavior on scale { Ease {} }
+                sourceComponent: StageView {
+                    onSourceClicked: menu.open = !menu.open
+                    onGlowClicked: { glowMenu.open = !glowMenu.open; settingsMenu.open = false; styleMenu.open = false; }
+                    onSettingsClicked: { settingsMenu.open = !settingsMenu.open; glowMenu.open = false; styleMenu.open = false; }
+                    onSearchClicked: builder.show("")
+                    onModeClicked: Config.cycleView()
+                }
+            }
+
             // Click-away layer for the narrow drawer and the source menu.
             MouseArea {
                 anchors.fill: parent
@@ -484,12 +511,15 @@ FloatingWindow {
                 id: library
                 onBuilderRequested: builder.show("")
                 z: 45
-                floating: full.lyricsView && full.libDocked
-                // The panel slides over the foot of the digits.
-                y: full.lyricsView && full.libDocked ? (full.libUnderClock ? full.clockAutoY + clock.height * 0.84 : full.clockAutoY) : full.m
-                width: full.lyricsView && full.libDocked ? full.dockW : full.libW
-                height: (full.lyricsView && full.libDocked ? bar.y + bar.height : full.panelBottom) - y
-                x: !Config.showLibrary ? -width - 40 : full.lyricsView && full.libDocked ? full.dockX : full.m
+                floating: full.floatSide && full.libDocked
+                // The panel slides over the foot of the digits; on the stage it
+                // stands by itself at the left edge.
+                y: full.stage && full.libDocked ? full.height * 0.2
+                    : full.lyricsView && full.libDocked ? (full.libUnderClock ? full.clockAutoY + clock.height * 0.84 : full.clockAutoY) : full.m
+                width: full.floatSide && full.libDocked ? full.dockW : full.libW
+                height: (full.stage && full.libDocked ? full.height - full.m : full.lyricsView && full.libDocked ? bar.y + bar.height : full.panelBottom) - y
+                x: !Config.showLibrary ? -width - 40 : full.stage && full.libDocked ? full.m + 12
+                    : full.lyricsView && full.libDocked ? full.dockX : full.m
                 Behavior on width { Ease {} }
                 opacity: Config.showLibrary ? 1 : 0
                 color: full.narrow ? Qt.rgba(Player.tint.r * 0.7, Player.tint.g * 0.7, Player.tint.b * 0.7, 0.95)
@@ -534,11 +564,12 @@ FloatingWindow {
             Item {
                 id: search
                 readonly property bool open: builder.open
-                width: full.lyricsView ? bar.width - centreSwitch.width - 10 : Math.min(560, bar.width - 40)
-                x: full.lyricsView ? bar.x : bar.x + (bar.width - width) / 2
+                readonly property rect spot: stageDeck.item?.searchSpot ?? Qt.rect(0, 0, 44, 44)
+                width: full.stage ? spot.width : full.lyricsView ? bar.width - centreSwitch.width - 10 : Math.min(560, bar.width - 40)
+                x: full.stage ? spot.x : full.lyricsView ? bar.x : bar.x + (bar.width - width) / 2
                 Behavior on width { Ease {} }
-                y: bar.y - height - 12
-                height: 44
+                y: full.stage ? spot.y : bar.y - height - 12
+                height: full.stage ? spot.height : 44
             }
 
             // What the centre shows: lyrics, cards, or cards only while the mouse moves.
@@ -561,10 +592,16 @@ FloatingWindow {
             TransportBar {
                 id: bar
                 z: 46
-                compact: full.lyricsView
-                width: full.lyricsView ? Math.max(560, Math.min(800, full.width * 0.42)) : full.width - full.m * 2
-                x: full.lyricsView ? (full.width - width) / 2 : full.m
-                y: full.height - height - (full.lyricsView ? Math.max(full.m, full.height * 0.11) : full.m)
+                compact: full.floatSide
+                // On the stage the bar is gone; it stays where the stage's own row
+                // of controls is, so the menus still open from the right place.
+                opacity: full.stage ? 0 : 1
+                visible: opacity > 0.01
+                Behavior on opacity { NumberAnimation { duration: 300 } }
+                readonly property real stageY: stageDeck.item?.rowY ?? full.height - 70
+                width: full.stage ? (stageDeck.item?.rowW ?? 560) : full.lyricsView ? Math.max(560, Math.min(800, full.width * 0.42)) : full.width - full.m * 2
+                x: full.floatSide ? (full.width - width) / 2 : full.m
+                y: full.stage ? stageY : full.height - height - (full.lyricsView ? Math.max(full.m, full.height * 0.11) : full.m)
                 Behavior on y { Ease {} }
                 onSourceClicked: menu.open = !menu.open
                 onStyleClicked: styleMenu.open = !styleMenu.open
@@ -590,6 +627,7 @@ FloatingWindow {
                 dockY: search.y
                 dockW: search.width
                 dockH: search.height
+                dockHidden: full.stage
             }
 
             // Settings and glow menus open at the right edge of the window, just

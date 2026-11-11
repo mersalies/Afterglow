@@ -270,10 +270,10 @@ Glass {
             onClicked: Config.showLibrary = !Config.showLibrary
         }
         IconButton {
-            icon: Config.view === "covers" ? "lyrics" : "covers"
+            icon: "covers"
             size: root.compact ? 34 : 38
-            tooltip: Config.view === "covers" ? "Текст по центру (V)" : "Обложки (V)"
-            onClicked: Config.view = Config.view === "covers" ? "lyrics" : "covers"
+            tooltip: "Режим: " + Config.viewName(Config.view) + ". Сменить (V)"
+            onClicked: Config.cycleView()
         }
 
         Rectangle {

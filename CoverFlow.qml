@@ -29,7 +29,11 @@ Item {
     onTargetChanged: pos = target
     onHomeChanged: { target = home; idle.stop(); }
 
-    readonly property real cardSize: Math.min(height / 1.24 * 0.92, width * 0.32, 460)
+    // Bare (the stage view): square covers without captions, the side ones turned
+    // away steeply and packed close, as on a shelf.
+    property bool bare: false
+    readonly property real cardSize: bare ? Math.min(height * 0.86, width * 0.3, 420)
+                                          : Math.min(height / 1.24 * 0.92, width * 0.32, 460)
 
     function go(delta) {
         target = Math.max(0, Math.min(items.length - 1, target + delta));
@@ -78,18 +82,20 @@ Item {
             readonly property bool isNow: modelData.now === true
 
             width: flow.cardSize
-            height: flow.cardSize * 1.24
+            height: flow.bare ? flow.cardSize : flow.cardSize * 1.24
             // Cards ride a gentle arc: the centre one highest, the sides dropping and
             // leaning along the curve. It follows the scroll position, so the arc
             // holds while browsing.
-            y: (flow.height - height) / 2 - flow.cardSize * 0.05
-                + flow.cardSize * 0.075 * Math.pow(Math.min(a, 3.2), 1.5)
-            rotation: Math.max(-9, Math.min(9, off * 3))
+            y: flow.bare ? (flow.height - height) / 2
+                : (flow.height - height) / 2 - flow.cardSize * 0.05
+                  + flow.cardSize * 0.075 * Math.pow(Math.min(a, 3.2), 1.5)
+            rotation: flow.bare ? 0 : Math.max(-9, Math.min(9, off * 3))
             x: flow.width / 2 - width / 2
-                + Math.sign(off) * (Math.min(a, 1) * flow.cardSize * 0.78
-                                    + Math.max(0, a - 1) * flow.cardSize * 0.36)
+                + Math.sign(off) * (flow.bare ? Math.min(a, 1) * flow.cardSize * 0.74 + Math.max(0, a - 1) * flow.cardSize * 0.3
+                                              : Math.min(a, 1) * flow.cardSize * 0.78 + Math.max(0, a - 1) * flow.cardSize * 0.36)
             z: 100 - a * 10
-            scale: (1 - Math.min(a, 3) * 0.13) * (hover.hovered && !centre ? 1.03 : 1)
+            scale: (flow.bare ? 1 - Math.min(a, 1) * 0.16 - Math.max(0, Math.min(a, 3) - 1) * 0.05 : 1 - Math.min(a, 3) * 0.13)
+                   * (hover.hovered && !centre ? 1.03 : 1)
             opacity: a > 3.6 ? 0 : 1 - Math.max(0, a - 2.2) * 0.7
             visible: opacity > 0.01
 
@@ -99,7 +105,7 @@ Item {
                 origin.x: card.width / 2
                 origin.y: card.height / 2
                 axis { x: 0; y: 1; z: 0 }
-                angle: Math.max(-48, Math.min(48, -card.off * 34))
+                angle: flow.bare ? Math.max(-58, Math.min(58, -card.off * 58)) : Math.max(-48, Math.min(48, -card.off * 34))
                 distanceToPlane: 1400
             }
 
@@ -121,7 +127,7 @@ Item {
 
                 ClippingRectangle {
                     anchors.fill: parent
-                    radius: 22
+                    radius: flow.bare ? 8 : 22
                     color: Qt.rgba(1, 1, 1, 0.10)
                     border.width: 1
                     border.color: Qt.rgba(1, 1, 1, card.centre ? 0.22 : 0.12)
@@ -151,6 +157,7 @@ Item {
 
                     // Caption plate under the cover
                     Column {
+                        visible: !flow.bare
                         anchors.top: art.bottom
                         anchors.left: parent.left
                         anchors.right: parent.right
