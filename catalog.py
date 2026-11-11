@@ -3,6 +3,7 @@
 
     catalog.py search  PLATFORM QUERY      -> {"artist", "albums", "tracks"}
     catalog.py album   PLATFORM ID         -> {"title", "artist", "art", "sub", "tracks"}
+    catalog.py library soundcloud USER     -> {"tracks", "sets"} (likes and playlists)
 
 PLATFORM: youtube-music (the YouTube Music app's own endpoints, unofficial),
 soundcloud and youtube (through yt-dlp). Prints one JSON object per line: a
@@ -11,6 +12,7 @@ again with the albums), the last line is the whole result. On failure an empty
 result and a message on stderr. Spotify is searched in Spotify.qml.
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -24,6 +26,29 @@ UA = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
 
 def emit(d):
     print(json.dumps(d, ensure_ascii=False), flush=True)
+
+
+# Covers and authors of SoundCloud pages, kept between runs: the library asks
+# for dozens at every start, and SoundCloud turns away a burst of them.
+META_FILE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "afterglow", "soundcloud.json")
+try:
+    with open(META_FILE) as f:
+        META = json.load(f)
+except Exception:
+    META = {}
+META_NEW = False
+
+
+def save_meta():
+    if not META_NEW:
+        return
+    try:
+        os.makedirs(os.path.dirname(META_FILE), exist_ok=True)
+        with open(META_FILE + ".tmp", "w") as f:
+            json.dump(META, f, ensure_ascii=False)
+        os.replace(META_FILE + ".tmp", META_FILE)
+    except OSError:
+        pass
 
 # ----------------------------------------------------------------- helpers
 
@@ -276,23 +301,46 @@ def entry_track(e, source):
             "source": source, "length": e.get("duration") or 0}
 
 
-def sc_art(url):
-    """Cover of a SoundCloud page (track, set, profile) from its public oEmbed."""
+def sc_oembed(url, deep=False):
+    """Cover and author of a SoundCloud page (track, set, profile): from the cache,
+    else its public oEmbed; `deep` falls back to yt-dlp (for sets) when that fails."""
+    global META_NEW
+    if url in META:
+        return META[url]["art"], META[url]["author"]
+    art, author = "", ""
     try:
         req = urllib.request.Request("https://soundcloud.com/oembed?format=json&url=" + urllib.parse.quote(url, safe=""),
                                      headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=6) as r:
-            return json.load(r).get("thumbnail_url") or ""
+            d = json.load(r)
+        art, author = d.get("thumbnail_url") or "", d.get("author_name") or ""
     except Exception:
-        return ""
+        if not deep:
+            return "", ""
+        d = ytdlp("--playlist-items", "0", url)
+        if not d:
+            return "", ""
+        art = next((t["url"] for t in d.get("thumbnails") or [] if t.get("id") == "t500x500"), "")
+        author = d.get("uploader") or ""
+    art = "" if "placeholder" in art else art
+    META[url] = {"art": art, "author": author}
+    META_NEW = True
+    return art, author
 
 
-def sc_fill_art(items, key):
-    """Covers for the items without one, fetched side by side."""
+def sc_art(url):
+    return sc_oembed(url)[0]
+
+
+def sc_fill_art(items, key, who=None, deep=False):
+    """Covers for the items without one, fetched side by side; `who` also takes
+    the author's name into that field."""
     need = [x for x in items if not x.get("art") and x.get(key)]
     with ThreadPoolExecutor(8) as ex:
-        for x, art in zip(need, ex.map(lambda x: sc_art(x[key]), need)):
+        for x, (art, author) in zip(need, ex.map(lambda x: sc_oembed(x[key], deep), need)):
             x["art"] = art
+            if who and author:
+                x[who] = author
 
 
 def sc_search(q):
@@ -320,23 +368,93 @@ def sc_search(q):
     return {"artist": artist, "albums": albums, "tracks": tracks[:10]}
 
 
+def sc_track(url):
+    """One track from its link: from oEmbed when it is a page (quick); through
+    yt-dlp when it is an API link (only an id) or oEmbed does not answer."""
+    if "//soundcloud.com/" in url or "//www.soundcloud.com/" in url:
+        try:
+            req = urllib.request.Request("https://soundcloud.com/oembed?format=json&url=" + urllib.parse.quote(url, safe=""),
+                                         headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=6) as r:
+                d = json.load(r)
+            who = d.get("author_name") or ""
+            title = d.get("title") or ""
+            if who and title.endswith(" by " + who):
+                title = title[:-len(" by " + who)]
+            art = d.get("thumbnail_url") or ""
+            return {"title": title, "artist": who, "album": "", "art": "" if "placeholder" in art else art,
+                    "uri": url, "source": "soundcloud", "length": 0}
+        except Exception:
+            pass
+    try:
+        out = subprocess.run(["yt-dlp", "--no-warnings", "-J", "--skip-download", url],
+                             capture_output=True, text=True, timeout=40)
+        return entry_track(json.loads(out.stdout), "soundcloud") if out.returncode == 0 else None
+    except Exception:
+        return None
+
+
 def sc_album(url):
-    # The flat list of a set holds only links: names come from them
-    # (soundcloud.com/<artist>/<track-name>); links without a name are skipped.
+    # The flat list of a set holds only links: tracks with a page link come from
+    # oEmbed at once; those with an API link (only an id) are looked up after,
+    # and the album is printed again with them.
     data = ytdlp(url)
-    tracks = []
-    for e in data.get("entries") or []:
-        m = re.search(r"//(?:www\.)?soundcloud\.com/([^/]+)/([^/?]+)", e.get("url") or "")
-        if not m and not e.get("title"):
+    art = sc_art(url)
+    links = [(e.get("url") or "").split("?")[0] for e in data.get("entries") or []]
+    links = [u for u in links if u]
+    found = {}
+
+    def result():
+        tracks = [found[u] for u in links if found.get(u)]
+        for t in tracks:
+            t["album"] = data.get("title") or ""
+            t["art"] = t["art"] or art
+        return {"title": data.get("title") or "", "artist": data.get("uploader") or "", "sub": "SoundCloud",
+                "about": "", "art": art, "tracks": tracks}
+
+    pages = [u for u in links if "//soundcloud.com/" in u or "//www.soundcloud.com/" in u]
+    api = [u for u in links if u not in pages]
+    with ThreadPoolExecutor(8) as ex:
+        for u, t in zip(pages, ex.map(sc_track, pages)):
+            found[u] = t
+        if api:
+            emit(dict(result(), more=True))
+            for u, t in zip(api, ex.map(sc_track, api)):
+                found[u] = t
+    return result()
+
+
+def sc_library(user):
+    """A public profile's liked tracks and its playlists: its own sets and the
+    sets it liked. Printed twice: at once, then again with the covers."""
+    with ThreadPoolExecutor(2) as ex:
+        likes, own = ex.map(lambda path: ytdlp("--playlist-items", "1:300", "https://soundcloud.com/%s/%s" % (user, path)),
+                            ("likes", "sets"))
+    tracks, sets, seen = [], [], set()
+    for e in (own.get("entries") or []) + (likes.get("entries") or []):
+        url = (e.get("url") or "").split("?")[0]
+        m = re.search(r"//(?:www\.)?soundcloud\.com/([^/]+)/", url)
+        if not m or url in seen:
             continue
-        t = entry_track(e, "soundcloud")
-        if t:
-            if m and not e.get("title"):
-                t["title"] = m.group(2).replace("-", " ").strip().capitalize()
-            t["artist"] = e.get("uploader") or data.get("uploader") or (m.group(1).replace("-", " ").title() if m else "")
-            tracks.append(t)
-    return {"title": data.get("title") or "", "artist": data.get("uploader") or "", "sub": "SoundCloud",
-            "about": "", "art": sc_art(url), "tracks": tracks}
+        seen.add(url)
+        who = e.get("uploader") or m.group(1).replace("-", " ").replace("_", " ").title()
+        if "/sets/" in url:
+            sets.append({"id": url, "title": e.get("title") or "", "sub": who, "art": "", "uri": url,
+                         "mine": m.group(1).lower() == user.lower()})
+        else:
+            tracks.append({"title": e.get("title") or "", "artist": who, "album": "", "art": "", "uri": url,
+                           "source": "soundcloud", "length": e.get("duration") or 0})
+    # What the cache knows already goes into the first answer.
+    for x, key, who in [(x, "id", "sub") for x in sets] + [(x, "uri", "artist") for x in tracks]:
+        if x[key] in META:
+            x["art"], x[who] = META[x[key]]["art"], META[x[key]]["author"] or x[who]
+    emit({"tracks": tracks, "sets": sets})
+    sc_fill_art(sets, "id", "sub", deep=True)
+    sc_fill_art(tracks[:150], "uri", "artist")
+    # The same album liked twice under two links shows once.
+    named = set()
+    sets = [x for x in sets if (x["title"].lower(), x["sub"]) not in named and not named.add((x["title"].lower(), x["sub"]))]
+    return {"tracks": tracks, "sets": sets}
 
 
 def yt_search(q):
@@ -357,10 +475,12 @@ def main():
         ("search", "soundcloud"): sc_search,
         ("album", "soundcloud"): sc_album,
         ("search", "youtube"): yt_search,
+        ("library", "soundcloud"): sc_library,
     }.get((what, platform))
     if not fn:
         sys.exit(2)
     emit(fn(arg))
+    save_meta()
 
 
 if __name__ == "__main__":

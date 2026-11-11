@@ -3,58 +3,44 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Search across services for the queue builder: Spotify (Web API, when
-// connected), YouTube and SoundCloud (yt-dlp). A pasted link is resolved
-// directly: Spotify track links via the API, anything else via yt-dlp
-// (single tracks and playlists).
+// Resolves a pasted link for the search panel: Spotify track links through the
+// Web API, anything else through yt-dlp (single tracks and playlists). Also
+// splits "Artist - Title" upload names. Searching by words lives in Catalog.qml.
 Singleton {
     id: root
 
     property string query: ""
-    property var youtube: []
-    property var soundcloud: []
     property var link: []
-    readonly property var spotify: Spotify.results
-    property bool ytBusy: false
-    property bool scBusy: false
     property bool linkBusy: false
-    readonly property bool busy: ytBusy || scBusy || linkBusy
+    readonly property bool busy: linkBusy
     readonly property bool isLink: /^https?:\/\//.test(query.trim())
 
+    // One process per link, so an abandoned one cannot answer for the next.
+    property var job: null
     function run(q) {
         query = q.trim();
-        youtube = [];
-        soundcloud = [];
         link = [];
-        yt.running = false;
-        sc.running = false;
-        ln.running = false;
-        if (query === "") { Spotify.search(""); return; }
+        if (job) job.running = false;
+        job = null;
+        linkBusy = false;
+        if (!isLink) return;
 
-        if (isLink) {
-            const m = query.match(/open\.spotify\.com\/(?:intl-\w+\/)?track\/(\w+)/);
-            if (m) {
-                linkBusy = true;
-                Spotify.api("GET", "/tracks/" + m[1], null, (code, d) => {
-                    linkBusy = false;
-                    const t = code === 200 ? Spotify.trackFrom(d) : null;
-                    link = t ? [t] : [];
-                });
-                return;
-            }
-            linkBusy = true;
-            ln.command = ["yt-dlp", "--no-warnings"].concat(Config.ytCookieArgs(), ["--flat-playlist", "-J", query]);
-            ln.running = true;
+        linkBusy = true;
+        const m = query.match(/open\.spotify\.com\/(?:intl-\w+\/)?track\/(\w+)/);
+        if (m) {
+            const asked = query;
+            Spotify.api("GET", "/tracks/" + m[1], null, (code, d) => {
+                if (asked !== query) return;
+                linkBusy = false;
+                const t = code === 200 ? Spotify.trackFrom(d) : null;
+                link = t ? [t] : [];
+            });
             return;
         }
-
-        Spotify.search(query);
-        ytBusy = true;
-        yt.command = ["yt-dlp", "--no-warnings"].concat(Config.ytCookieArgs(), ["--flat-playlist", "-J", "ytsearch12:" + query]);
-        yt.running = true;
-        scBusy = true;
-        sc.command = ["yt-dlp", "--no-warnings", "--flat-playlist", "-J", "scsearch10:" + query];
-        sc.running = true;
+        job = linkComp.createObject(root, {
+            command: ["yt-dlp", "--no-warnings"].concat(Config.ytCookieArgs(), ["--flat-playlist", "-J", query])
+        });
+        job.running = true;
     }
 
     // "Artist - Title (Official Video)" → { artist, title }
@@ -90,48 +76,30 @@ Singleton {
         try { return JSON.parse(text); } catch (e) { return null; }
     }
 
-    Process {
-        id: yt
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const d = root.parse(text);
-                root.youtube = (d?.entries ?? []).map(e => root.fromEntry(e, "youtube")).filter(t => t);
-                root.ytBusy = false;
+    Component {
+        id: linkComp
+        Process {
+            id: ln
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    if (root.job !== ln) return;
+                    const d = root.parse(text);
+                    const src = root.sourceOf(root.query);
+                    const entries = d?.entries ?? (d ? [d] : []);
+                    root.link = entries.map(e => {
+                        const t = root.fromEntry(e, src);
+                        if (t && !/^https?:/.test(t.uri) && e.id && src.startsWith("youtube")) t.uri = "https://www.youtube.com/watch?v=" + e.id;
+                        return t;
+                    }).filter(t => t);
+                }
             }
-        }
-        onExited: root.ytBusy = false
-    }
-
-    Process {
-        id: sc
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const d = root.parse(text);
-                root.soundcloud = (d?.entries ?? []).map(e => root.fromEntry(e, "soundcloud")).filter(t => t);
-                root.scBusy = false;
-            }
-        }
-        onExited: root.scBusy = false
-    }
-
-    Process {
-        id: ln
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const d = root.parse(text);
-                const src = root.sourceOf(root.query);
-                const entries = d?.entries ?? (d ? [d] : []);
-                root.link = entries.map(e => {
-                    const t = root.fromEntry(e, src);
-                    if (t && !/^https?:/.test(t.uri) && e.id && src.startsWith("youtube")) t.uri = "https://www.youtube.com/watch?v=" + e.id;
-                    return t;
-                }).filter(t => t);
+            onExited: code => {
+                Qt.callLater(ln.destroy);
+                if (root.job !== ln) return;
+                root.job = null;
                 root.linkBusy = false;
+                if (code !== 0 && root.link.length === 0) Spotify.say("Эту ссылку открыть не получилось");
             }
-        }
-        onExited: code => {
-            root.linkBusy = false;
-            if (code !== 0 && root.link.length === 0) Spotify.say("Эту ссылку открыть не получилось");
         }
     }
 }

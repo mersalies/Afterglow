@@ -574,7 +574,7 @@ Glass {
                     platform: "soundcloud"
                     name: "SoundCloud"
                     linked: Accounts.scStatus === "ok"
-                    info: Accounts.scStatus === "ok" ? Accounts.scName + " · " + Accounts.scLikes.length + " лайков"
+                    info: Accounts.scStatus === "ok" ? Accounts.scName + " · " + Accounts.scLikes.length + " лайков, " + Accounts.scSets.length + " альбомов"
                         : Accounts.scStatus === "checking" ? "Загружаю лайки…"
                         : Accounts.scStatus === "error" ? "Профиль не найден или лайки скрыты"
                         : "Не указан"

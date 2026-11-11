@@ -1,10 +1,11 @@
 import QtQuick
 
-// Left panel: what plays next, what played before, and the Spotify library.
+// Left panel: what plays next, what played before, and the library of the
+// service pinned at the transport bar's badge (Spotify when none or YouTube is).
 Glass {
     id: root
 
-    // "next" | "history" | "spotify"
+    // "next" | "history" | "library"
     property string tab: "history"
     // No glass sheet: rows float on the field, the playing one raised as a card.
     property bool floating: false
@@ -15,8 +16,83 @@ Glass {
     border.color: floating ? "transparent" : Qt.rgba(1, 1, 1, 0.12)
     clip: false
 
-    readonly property bool hasQueue: Spotify.connected && Player.source === "spotify"
     function isNow(t) { return t.title === Player.title && t.artist === Player.artist; }
+
+    // ---- The library tab follows the pinned service
+    readonly property var libServices: ["spotify", "soundcloud", "youtube-music", "apple", "yandex", "vk"]
+    readonly property string service: libServices.includes(Config.source) ? Config.source : "spotify"
+    readonly property string serviceLabel: ({ "youtube-music": "YT Music", "yandex": "Яндекс", "vk": "VK" })[service]
+                                           ?? Player.sourceName(service, null)
+    // Services with no open API: Afterglow only follows them as they play.
+    readonly property bool closedService: ["apple", "yandex", "vk"].includes(service)
+
+    // What played on this service, newest first, once each.
+    readonly property var serviceHistory: {
+        const seen = new Set();
+        return History.tracks.filter(h => h.source === service && !seen.has(h.title + "\u0001" + h.artist)
+                                          && seen.add(h.title + "\u0001" + h.artist));
+    }
+
+    // Rows of the library (not Spotify, which has its own below).
+    readonly property var lists: {
+        const out = [];
+        if (service === "soundcloud") {
+            if (Accounts.scLikes.length)
+                out.push({ kind: "list", id: "sc-likes", title: "Лайки", sub: Accounts.scLikes.length + " треков",
+                           art: Accounts.scLikes.find(t => t.art)?.art ?? "", tracks: Accounts.scLikes });
+            for (const a of Accounts.scSets)
+                out.push({ kind: "set", id: a.id, title: a.title, sub: (a.mine ? "Плейлист" : "Альбом") + "  ·  " + a.sub, art: a.art, uri: a.uri });
+        } else if (service === "youtube-music" && Accounts.ytmLiked.length) {
+            out.push({ kind: "list", id: "ytm-liked", title: "Понравившиеся", sub: Accounts.ytmLiked.length + " треков",
+                       art: Accounts.ytmLiked[0].art, tracks: Accounts.ytmLiked });
+        }
+        const played = serviceHistory.filter(h => h.uri);
+        if (!closedService && played.length)
+            out.push({ kind: "list", id: "history", title: "Из истории", sub: played.length + " треков", art: played[0].art, tracks: played });
+        return out;
+    }
+
+    // An open list or album: { id, title, sub, art, tracks, loading, message }
+    property var openList: null
+    onServiceChanged: openList = null
+    function openRow(r) {
+        if (r.kind !== "set") {
+            openList = { id: r.id, title: r.title, sub: r.sub, art: r.art, tracks: r.tracks, loading: false, message: "", uri: "" };
+            return;
+        }
+        openList = { id: r.id, title: r.title, sub: r.sub, art: r.art, tracks: [], loading: true, message: "", uri: r.uri };
+        Accounts.scSet(r.uri, d => {
+            if (root.openList?.id !== r.id) return;
+            const tracks = (d?.tracks ?? []).map(t => Object.assign({}, t, { art: t.art || d.art || r.art }));
+            const more = d?.more === true;
+            root.openList = Object.assign({}, root.openList, {
+                // Tracks closed in the listener's region are left out of the set by SoundCloud.
+                tracks, loading: more && !tracks.length, more,
+                message: tracks.length || more ? "" : d ? "SoundCloud не отдаёт треки этого альбома: скорее всего, они закрыты в твоём регионе. Его можно открыть на сайте: кнопка с нотой вверху."
+                                                                       : "Не удалось загрузить альбом"
+            });
+        });
+    }
+    function shuffled(list) {
+        const a = list.slice();
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    }
+    readonly property string emptyText: {
+        if (service === "soundcloud")
+            return !Accounts.scName ? "Укажи свой профиль SoundCloud в настройках, во вкладке «Аккаунты»: здесь появятся твои лайки и альбомы."
+                 : Accounts.scStatus === "checking" ? "Загружаю лайки и альбомы…"
+                 : Accounts.scStatus === "error" ? "Профиль не найден или лайки скрыты."
+                 : "В профиле пока нет лайков.";
+        if (service === "youtube-music")
+            return !Config.youtubeCookies ? "Выбери браузер, где ты вошёл в YouTube Music, в настройках, во вкладке «Аккаунты»: здесь появятся понравившиеся треки."
+                 : Accounts.ytmStatus === "checking" ? "Загружаю понравившиеся…"
+                 : "Не получилось загрузить понравившиеся треки.";
+        return "";
+    }
 
     // Segmented tabs
     Rectangle {
@@ -32,7 +108,7 @@ Glass {
         border.width: root.floating ? 1 : 0
         border.color: Qt.rgba(1, 1, 1, 0.1)
 
-        readonly property var names: [["next", "Далее"], ["history", "История"], ["spotify", "Spotify"]]
+        readonly property var names: [["next", "Далее"], ["history", "История"], ["library", root.serviceLabel]]
         readonly property real seg: width / names.length
 
         Rectangle {
@@ -55,6 +131,9 @@ Glass {
                     height: tabs.height
                     Text {
                         anchors.centerIn: parent
+                        width: parent.width - 10
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
                         text: modelData[1]
                         font.family: Theme.font
                         font.pixelSize: 13
@@ -141,7 +220,7 @@ Glass {
         // ---- Spotify
         Item {
             anchors.fill: parent
-            visible: root.tab === "spotify"
+            visible: root.tab === "library" && root.service === "spotify"
 
             SpotifyConnect {
                 anchors.fill: parent
@@ -271,6 +350,152 @@ Glass {
                 Hint {
                     visible: Spotify.openList && (Spotify.openList.loading || Spotify.openList.message)
                     text: Spotify.openList?.loading ? "Загружаю…" : (Spotify.openList?.message ?? "")
+                }
+            }
+        }
+            // ---- SoundCloud, YouTube Music, and the services with no open API
+        Item {
+            anchors.fill: parent
+            visible: root.tab === "library" && root.service !== "spotify"
+
+            // Lists and albums
+            ListView {
+                anchors.fill: parent
+                visible: root.openList === null
+                spacing: 2
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: root.closedService ? root.serviceHistory : root.lists
+                header: Column {
+                    width: ListView.view.width
+                    visible: root.closedService
+                    height: visible ? implicitHeight + 10 : 0
+                    spacing: 10
+                    Text {
+                        x: 8
+                        width: parent.width - 16
+                        wrapMode: Text.WordWrap
+                        text: "У " + Player.sourceName(root.service, null) + " нет открытого доступа к медиатеке: музыка играет "
+                              + (root.service === "yandex" ? "в приложении или вкладке браузера" : "во вкладке браузера")
+                              + ", а Afterglow показывает её и управляет ей."
+                              + (root.serviceHistory.length ? " Ниже то, что ты там слушал." : "")
+                        font.family: Theme.font
+                        font.pixelSize: 12
+                        lineHeight: 1.25
+                        color: Theme.textSecondary
+                    }
+                    Pill {
+                        x: 8
+                        icon: "music"
+                        label: "Открыть " + Player.sourceName(root.service, null)
+                        onClicked: Qt.openUrlExternally(Player.defaultPages[root.service])
+                    }
+                }
+                delegate: TrackRow {
+                    required property var modelData
+                    width: ListView.view.width
+                    title: modelData.title
+                    subtitle: root.closedService ? modelData.artist : modelData.sub
+                    art: modelData.art
+                    active: root.closedService && root.isNow(modelData)
+                    glassActive: root.floating
+                    onClicked: {
+                        if (!root.closedService) root.openRow(modelData);
+                        else if (modelData.uri) History.play(modelData);
+                    }
+                }
+            }
+
+            Hint {
+                visible: root.openList === null && !root.closedService && root.lists.length === 0
+                text: root.emptyText
+            }
+
+            // Open list or album
+            Item {
+                anchors.fill: parent
+                visible: root.openList !== null
+
+                Row {
+                    id: genHead
+                    height: 36
+                    spacing: 4
+                    IconButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: "back"
+                        size: 32
+                        tooltip: "Назад"
+                        onClicked: root.openList = null
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: body.width - 44 - (siteBtn.visible ? 36 : 0)
+                        elide: Text.ElideRight
+                        text: root.openList?.title ?? ""
+                        font.family: Theme.font
+                        font.pixelSize: 15
+                        font.weight: Font.DemiBold
+                        color: Theme.text
+                    }
+                    IconButton {
+                        id: siteBtn
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: (root.openList?.uri ?? "") !== ""
+                        icon: "music"
+                        size: 32
+                        tooltip: "Открыть на SoundCloud"
+                        onClicked: Qt.openUrlExternally(root.openList.uri)
+                    }
+                }
+
+                Row {
+                    id: genPills
+                    anchors.top: genHead.bottom
+                    anchors.topMargin: 6
+                    x: 4
+                    spacing: 6
+                    readonly property bool hasTracks: (root.openList?.tracks?.length ?? 0) > 0
+                    visible: hasTracks
+                    Pill { icon: "play"; label: "Играть"; onClicked: Queue.playAll(root.openList.tracks) }
+                    Pill { icon: "refresh"; label: "Перемешать"; onClicked: Queue.playAll(root.shuffled(root.openList.tracks)) }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (root.openList?.tracks?.length ?? 0) + (root.openList?.more ? "…" : "")
+                        font.family: Theme.font
+                        font.pixelSize: 12
+                        color: Theme.textTertiary
+                    }
+                }
+
+                ListView {
+                    anchors.top: genPills.visible ? genPills.bottom : genHead.bottom
+                    anchors.topMargin: 6
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    spacing: 2
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    model: root.openList?.tracks ?? []
+                    delegate: TrackRow {
+                        required property var modelData
+                        width: ListView.view.width
+                        title: modelData.title
+                        subtitle: modelData.artist
+                        art: modelData.art
+                        active: root.isNow(modelData)
+                        glassActive: root.floating
+                        queueable: true
+                        nextable: true
+                        onQueued: Queue.add(modelData)
+                        onQueuedNext: Queue.addNext(modelData)
+                        onClicked: if (!active) Queue.playNow(modelData)
+                    }
+                }
+
+                Hint {
+                    visible: root.openList !== null && (root.openList.loading || root.openList.message !== "")
+                    text: root.openList?.loading ? "Загружаю…" : (root.openList?.message ?? "")
                 }
             }
         }

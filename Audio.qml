@@ -18,7 +18,10 @@ Singleton {
     property double lastKick: 0
     signal kicked(real strength)
 
+    // Only while something on screen moves with it: the window, or the edge glow
+    // when it is allowed to shine without the window.
     readonly property bool wanted: Player.isPlaying
+        && (AppWindow.visibleNow || (Config.glowEnabled && !Config.glowFollowsWindow))
     readonly property string confPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/afterglow-cava.conf"
 
     readonly property string conf: [

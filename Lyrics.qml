@@ -101,42 +101,35 @@ Singleton {
     // ---- 1. Own files: "Artist - Title.lrc" or "Title.lrc", any case, subfolders too.
     // A file without time stamps counts as plain lyrics.
     function fromFolder(t, done) {
-        folderScan.want = [norm(t.artist + t.title), norm(t.first + t.title), norm(t.first + t.clean),
-                           norm(t.title), norm(t.clean)];
-        folderScan.done = done;
-        folderScan.running = false;
-        folderScan.running = true;
-    }
-    Process {
-        id: folderScan
-        property var want: []
-        property var done: null
-        command: ["sh", "-c", 'mkdir -p "$1"; find -L "$1" -maxdepth 3 -type f \\( -iname "*.lrc" -o -iname "*.txt" \\)', "sh", root.folder]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const files = text.split("\n").filter(f => f);
-                const name = f => root.norm(f.slice(f.lastIndexOf("/") + 1).replace(/\.(lrc|txt)$/i, ""));
-                let hit = "";
-                for (const w of folderScan.want) {
-                    hit = files.find(f => name(f) === w) || "";
-                    if (hit) break;
-                }
-                const cb = folderScan.done;
-                if (!hit) { cb(null); return; }
-                folderRead.done = cb;
-                folderRead.command = ["cat", hit];
-                folderRead.running = true;
+        const want = [norm(t.artist + t.title), norm(t.first + t.title), norm(t.first + t.clean),
+                      norm(t.title), norm(t.clean)];
+        run(["sh", "-c", 'mkdir -p "$1"; find -L "$1" -maxdepth 3 -type f \\( -iname "*.lrc" -o -iname "*.txt" \\)', "sh", folder], text => {
+            const files = text.split("\n").filter(f => f);
+            const name = f => norm(f.slice(f.lastIndexOf("/") + 1).replace(/\.(lrc|txt)$/i, ""));
+            let hit = "";
+            for (const w of want) {
+                hit = files.find(f => name(f) === w) || "";
+                if (hit) break;
             }
-        }
+            if (!hit) { done(null); return; }
+            run(["cat", hit], body => done(/\[\d+:\d+(\.\d+)?\]/.test(body) ? { synced: body } : { plain: body }));
+        });
     }
-    Process {
-        id: folderRead
-        property var done: null
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const lrc = /\[\d+:\d+(\.\d+)?\]/.test(text);
-                folderRead.done(lrc ? { synced: text } : { plain: text });
-            }
+
+    // A helper process per request: cb(stdout) exactly once, when it has ended.
+    // (A shared process restarted for the next track answered for it with the
+    // cut-off output of the one before.)
+    function run(command, cb) {
+        runComp.createObject(root, { command, cb, running: true });
+    }
+    Component {
+        id: runComp
+        Process {
+            id: rp
+            property var cb
+            property string got: ""
+            stdout: StdioCollector { onStreamFinished: rp.got = text }
+            onExited: { rp.cb(rp.got); Qt.callLater(rp.destroy); }
         }
     }
 
@@ -202,20 +195,10 @@ Singleton {
     // ---- 4. YouTube Music through lyrics-ytm.py: often has Russian lyrics,
     // synced when the app shows them in time. Unofficial, may stop working.
     function fromYoutubeMusic(t, done) {
-        ytm.done = done;
-        ytm.command = ["python3", "-I", root.ytmHelper, t.artist, t.title];
-        ytm.running = false;
-        ytm.running = true;
-    }
-    Process {
-        id: ytm
-        property var done: null
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const lrc = /^\[\d+:\d+(\.\d+)?\]/m.test(text);
-                ytm.done(text.trim() === "" ? null : lrc ? { synced: text } : { plain: text });
-            }
-        }
+        run(["timeout", "25", "python3", "-I", ytmHelper, t.artist, t.title], text => {
+            const lrc = /^\[\d+:\d+(\.\d+)?\]/m.test(text);
+            done(text.trim() === "" ? null : lrc ? { synced: text } : { plain: text });
+        });
     }
 
     function finish(k, synced, plain) {
@@ -248,15 +231,35 @@ Singleton {
         return out;
     }
 
+    // A site that does not answer in 12 s counts as "nothing found", so the
+    // next source gets its turn instead of "loading" for ever.
     function request(url, cb) {
         const xhr = new XMLHttpRequest();
+        let over = false;
+        const guard = guardComp.createObject(root, { hit: () => {
+            if (over) return;
+            over = true;
+            xhr.abort();
+            cb(false, null);
+        } });
         xhr.onreadystatechange = () => {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return;
+            if (xhr.readyState !== XMLHttpRequest.DONE || over) return;
+            over = true;
+            guard.destroy();
             if (xhr.status === 200) {
                 try { cb(true, JSON.parse(xhr.responseText)); } catch (e) { cb(false, null); }
             } else cb(false, null);
         };
         xhr.open("GET", url);
         xhr.send();
+    }
+    Component {
+        id: guardComp
+        Timer {
+            property var hit
+            interval: 12000
+            running: true
+            onTriggered: { hit(); destroy(); }
+        }
     }
 }

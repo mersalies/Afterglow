@@ -65,7 +65,9 @@ Item {
                        art: Accounts.ytmLiked[0].art, platform: "youtube-music", tracks: Accounts.ytmLiked });
         if (Accounts.scLikes.length)
             out.push({ group: "SoundCloud", kind: "list", id: "sc-likes", title: "Лайки", sub: Accounts.scLikes.length + " треков",
-                       art: "", platform: "soundcloud", tracks: Accounts.scLikes });
+                       art: Accounts.scLikes.find(t => t.art)?.art ?? "", platform: "soundcloud", tracks: Accounts.scLikes });
+        for (const a of Accounts.scSets)
+            out.push({ group: "SoundCloud", kind: "album", id: a.id, title: a.title, sub: a.sub, art: a.art, uri: a.uri, platform: "soundcloud" });
         const seen = new Set();
         const scHist = History.tracks.filter(h => h.source === "soundcloud" && h.uri && !seen.has(h.uri) && seen.add(h.uri));
         if (scHist.length)
@@ -84,6 +86,10 @@ Item {
         if (c.kind === "list") {
             Catalog.album = { id: c.id, title: c.title, artist: c.group, art: c.art, sub: c.sub, about: "",
                               tracks: c.tracks, loading: false, platform: c.platform, uri: "" };
+            return;
+        }
+        if (c.platform !== "spotify") {
+            Catalog.openAlbum({ id: c.id, title: c.title, artist: c.sub, art: c.art, sub: "Альбом", platform: c.platform });
             return;
         }
         const t = Catalog.ticket;

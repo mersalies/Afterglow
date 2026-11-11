@@ -130,22 +130,24 @@ Singleton {
         if (picked.length) items = items.concat(picked);
     }
 
-    // Restart the track, or go back to the previous one in the history.
+    // Restart the track, or go back: through what the queue played in this
+    // session, one step per press; before that, to the last track in the history.
+    property var past: []
     function back() {
         if (Player.position > 3) { Player.setPosition(0); return; }
-        const prev = History.tracks.find(h => !(h.title === Player.title && h.artist === Player.artist));
-        if (prev) {
-            if (current) items = [current].concat(items);
-            start(norm(prev));
-        } else {
-            Player.setPosition(0);
-        }
+        const prev = past.length ? past[past.length - 1]
+            : History.tracks.find(h => h.uri && !(h.title === Player.title && h.artist === Player.artist));
+        if (!prev) { Player.setPosition(0); return; }
+        past = past.slice(0, -1);
+        if (current) items = [current].concat(items);
+        start(norm(prev), true);
     }
 
     // Pick up the queue again after the user took over.
     function resume() { if (!active) advance(); }
 
-    function start(t) {
+    function start(t, goingBack) {
+        if (current && !goingBack && current.uri !== t.uri) past = past.concat([current]).slice(-50);
         current = t;
         active = true;
         watch.matched = false;

@@ -45,8 +45,7 @@ Singleton {
         videoTitle = "";
         videoDuration = 0;
         streamUrl = "";
-        search.running = false;
-        fetch.running = false;
+        cancel();
         debounce.restart();
     }
 
@@ -101,20 +100,39 @@ Singleton {
         try { return JSON.parse(text).entries || []; } catch (e) { return []; }
     }
 
+    // One process per search and per download: a new request never reuses the
+    // process of the one before, whose late answer would show the wrong clip.
+    property var searchJob: null
+    property var fetchJob: null
+    function cancel() {
+        if (searchJob) searchJob.running = false;
+        if (fetchJob) fetchJob.running = false;
+        searchJob = null;
+        fetchJob = null;
+    }
+
     property bool pickAny: false   // user asked for "another clip": take whatever comes next
     function find(any) {
         pickAny = any;
+        if (searchJob) return;     // already looking for this track
         status = "searching";
-        search.command = ["yt-dlp", "--no-warnings"].concat(Config.ytCookieArgs(), ["--flat-playlist", "-J", query(Player.artist, Player.title)]);
-        search.running = true;
+        searchJob = searchComp.createObject(root, {
+            command: ["yt-dlp", "--no-warnings"].concat(Config.ytCookieArgs(), ["--flat-playlist", "-J", query(Player.artist, Player.title)])
+        });
+        searchJob.running = true;
     }
 
-    Process {
-        id: search
-        stdout: StdioCollector {
-            onStreamFinished: {
-                if (root.status !== "searching") return;
-                const ranked = root.rank(root.parse(text), Player.artist, Player.title, Player.length);
+    Component {
+        id: searchComp
+        Process {
+            id: search
+            property string found: ""
+            stdout: StdioCollector { onStreamFinished: search.found = text }
+            onExited: code => {
+                Qt.callLater(search.destroy);
+                if (root.searchJob !== search) return;
+                root.searchJob = null;
+                const ranked = code === 0 ? root.rank(root.parse(found), Player.artist, Player.title, Player.length) : [];
                 root.candidates = ranked;
                 const best = ranked[0];
                 if (best && (root.pickAny || root.good(best))) {
@@ -126,7 +144,6 @@ Singleton {
                 }
             }
         }
-        onExited: code => { if (code !== 0 && root.status === "searching") root.status = "none"; }
     }
 
     // ---- Download into the cache (or reuse), then play from disk
@@ -150,33 +167,36 @@ Singleton {
         videoDuration = c.duration || 0;
         streamUrl = "";
         status = "loading";
-        fetch.out = "";
-        fetch.forKey = key;
-        fetch.command = fetchCommand(c.id);
-        fetch.running = true;
+        if (fetchJob) fetchJob.running = false;
+        fetchJob = fetchComp.createObject(root, { command: fetchCommand(c.id) });
+        fetchJob.running = true;
     }
 
     // A new quality applies to the clip on screen right away.
     Connections {
         target: Config
         function onClipQualityChanged() {
-            if (root.videoId !== "" && root.status !== "searching")
+            if (root.videoId !== "" && !root.searchJob)
                 root.use({ id: root.videoId, title: root.videoTitle, duration: root.videoDuration });
         }
     }
 
-    Process {
-        id: fetch
-        property string out: ""
-        property string forKey: ""
-        stdout: SplitParser { onRead: line => fetch.out = line.trim() }
-        onExited: code => {
-            if (forKey !== root.key) return;
-            if (code === 0 && out.startsWith("/")) {
-                root.streamUrl = "file://" + out;
-                root.status = "ready";
-            } else {
-                root.status = "none";
+    Component {
+        id: fetchComp
+        Process {
+            id: fetch
+            property string out: ""
+            stdout: SplitParser { onRead: line => fetch.out = line.trim() }
+            onExited: code => {
+                Qt.callLater(fetch.destroy);
+                if (root.fetchJob !== fetch) return;
+                root.fetchJob = null;
+                if (code === 0 && out.startsWith("/")) {
+                    root.streamUrl = "file://" + out;
+                    root.status = "ready";
+                } else {
+                    root.status = "none";
+                }
             }
         }
     }

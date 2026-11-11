@@ -14,7 +14,9 @@ Singleton {
     property var item: null          // { title, artist, album, art, uri, source, length }
     // "idle" | "loading" | "ready" | "error"
     property string status: "idle"
-    property real volume: 0.8
+    // Remembered between runs (Config.volume).
+    property real volume: Config.volume
+    onVolumeChanged: if (Math.abs(Config.volume - volume) > 0.001) Config.volume = volume
 
     readonly property bool active: item !== null
     // The player (and FFmpeg behind it) exists only while a track is loaded here.
@@ -73,8 +75,8 @@ Singleton {
         item = it;
         status = "loading";
         // Already downloading in the background: wait for it instead of racing it.
-        if (pre.running && pre.uri === it.uri) waitForPre = true;
-        else startFetch(it.uri, false);
+        waitForPre = pre.running && pre.uri === it.uri;
+        if (!waitForPre) startFetch(it.uri, false);
     }
     property bool waitForPre: false
 

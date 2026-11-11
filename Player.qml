@@ -91,17 +91,20 @@ Singleton {
         if (host.includes("vk.com") || host.includes("vk.ru")) return "vk";
         if (host.includes("soundcloud")) return "soundcloud";
         if (host.includes("music.yandex")) return "yandex";
+        if (host.includes("music.apple")) return "apple";
         if (host.includes("open.spotify")) return "spotify-web";
         return bus.replace(/^org\.mpris\.mediaplayer2\./, "").split(".")[0] || id || "player";
     }
 
     readonly property var sourceNames: ({
         "spotify": "Spotify", "spotify-web": "Spotify Web", "yandex": "Яндекс Музыка",
-        "youtube-music": "YouTube Music", "youtube": "YouTube", "vk": "VK Музыка", "soundcloud": "SoundCloud"
+        "youtube-music": "YouTube Music", "youtube": "YouTube", "vk": "VK Музыка", "soundcloud": "SoundCloud",
+        "apple": "Apple Music"
     })
     readonly property var sourceColors: ({
         "spotify": "#1ed760", "spotify-web": "#1ed760", "yandex": "#ffcc00",
-        "youtube-music": "#ff2d55", "youtube": "#ff2d55", "vk": "#2787f5", "soundcloud": "#ff6a1f"
+        "youtube-music": "#ff2d55", "youtube": "#ff2d55", "vk": "#2787f5", "soundcloud": "#ff6a1f",
+        "apple": "#fa2d48"
     })
     function sourceName(key, p) { return sourceNames[key] ?? p?.identity ?? key; }
     function sourceColor(key) { return sourceColors[key] ?? "#c8c8d0"; }
@@ -163,10 +166,11 @@ Singleton {
         return m + ":" + (s < 10 ? "0" : "") + s;
     }
 
-    // MPRIS does not push position updates; poll while playing.
+    // MPRIS does not push position updates; poll while an MPRIS player plays:
+    // smoothly while the window is on screen, once a second when it is not.
     Timer {
-        running: root.isPlaying
-        interval: 80
+        running: root.isPlaying && !root.local
+        interval: AppWindow.visibleNow ? 80 : 1000
         repeat: true
         onTriggered: root.active?.positionChanged()
     }
@@ -182,11 +186,12 @@ Singleton {
         return (h >>> 0).toString(16);
     }
 
-    // Covers are copied into ~/.cache so history keeps them after the player forgets them.
-    // Until the copy of this track's cover is there, the cover is shown straight from
-    // its URL (never the previous track's file); a copy that finishes after the
-    // track changed is ignored. One process per cover, so a slow one cannot answer
-    // for the next.
+    // Covers are copied into ~/.cache so history keeps them after the player forgets
+    // them (browsers hand out temporary files and delete them on the next track).
+    // Until the copy of this track's cover is there, the cover is shown straight
+    // from its URL (never the previous track's file); a copy that finishes after
+    // the track changed is ignored. One process per cover, so a slow one cannot
+    // answer for the next.
     onArtUrlChanged: artDebounce.restart()
     // Players change title and cover in separate updates: settle first.
     Timer {
@@ -198,15 +203,20 @@ Singleton {
         const url = artUrl;
         if (url === "") { localArt = ""; return; }
         const remote = url.startsWith("http");
-        if (!remote) { localArt = url; return; }
-        localArt = "";
-        const target = cacheDir + "/" + hash(url);
+        const file = url.startsWith("file://") ? decodeURIComponent(url.slice(7)) : url.startsWith("/") ? url : "";
+        if (!remote && !file) { localArt = url; return; }
+        // Already ours (a cover from the history or the queue).
+        if (file.startsWith(cacheDir + "/")) { localArt = "file://" + file; return; }
+        localArt = remote ? "" : "file://" + file;
+        // A player's file may be reused for another cover: its time stamp goes in the name.
+        const get = remote ? 'curl -sfL --retry 2 --max-time 15 -o "$dst.part" "$3" && mv "$dst.part" "$dst"'
+                           : 'cp "$3" "$dst.part" && mv "$dst.part" "$dst"';
         artComp.createObject(root, {
-            url, target,
+            url,
             command: ["sh", "-c", Cache.pruneFn +
-                'mkdir -p "$1" && { [ -s "$2" ] || { curl -sfL --retry 2 --max-time 15 -o "$2.part" "$3" && mv "$2.part" "$2"; }; }'
-                + '; s=$?; touch "$2" 2>/dev/null; prune "$1" "$4"; exit $s',
-                "sh", cacheDir, target, url, String(Cache.limitBytes(Config.artCacheMB))],
+                'mkdir -p "$1" || exit 1; dst="$2"; ' + (remote ? '' : 'dst="$2-$(stat -c %Y "$3" 2>/dev/null || echo 0)"; ') +
+                '[ -s "$dst" ] || { ' + get + '; } || exit 1; touch "$dst"; prune "$1" "$4"; echo "$dst"',
+                "sh", cacheDir, cacheDir + "/" + hash(url), remote ? url : file, String(Cache.limitBytes(Config.artCacheMB))],
             running: true
         });
     }
@@ -215,9 +225,10 @@ Singleton {
         Process {
             id: ap
             property string url
-            property string target
+            property string out: ""
+            stdout: SplitParser { onRead: line => ap.out = line.trim() }
             onExited: code => {
-                if (code === 0 && ap.url === root.artUrl) root.localArt = "file://" + ap.target;
+                if (code === 0 && ap.out.startsWith("/") && ap.url === root.artUrl) root.localArt = "file://" + ap.out;
                 Qt.callLater(ap.destroy);
             }
         }

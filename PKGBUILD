@@ -1,6 +1,6 @@
 # Local package: run `makepkg -si` in this directory.
 pkgname=afterglow
-pkgver=0.17.2
+pkgver=0.18.1
 pkgrel=1
 pkgdesc="Glass music companion for Hyprland: synced lyrics, ambient screen glow, any MPRIS player"
 arch=('any')

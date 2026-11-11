@@ -48,7 +48,9 @@ Singleton {
     function prune() { pruner.running = false; pruner.running = true; }
     Process {
         id: pruner
-        command: ["sh", "-c", root.pruneFn + 'prune "$1/clips" "$2"; prune "$1/audio" "$3"; prune "$1/art" "$4"', "sh", root.dir,
+        // Also sweeps downloads that were abandoned half-way (older than an hour).
+        command: ["sh", "-c", root.pruneFn + 'find "$1/clips" "$1/audio" "$1/art" -name "*.part*" -mmin +60 -delete 2>/dev/null; '
+                  + 'prune "$1/clips" "$2"; prune "$1/audio" "$3"; prune "$1/art" "$4"', "sh", root.dir,
                   String(root.limitBytes(Config.clipCacheMB)), String(root.limitBytes(Config.audioCacheMB)), String(root.limitBytes(Config.artCacheMB))]
         onExited: root.measure()
     }

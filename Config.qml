@@ -46,6 +46,7 @@ Singleton {
     property alias soundcloudUser: adapter.soundcloudUser
     property alias searchPlatform: adapter.searchPlatform
     property alias cardsScale: adapter.cardsScale
+    property alias volume: adapter.volume
     property alias clockScale: adapter.clockScale
     property alias clockLayer: adapter.clockLayer
     property alias clockFill: adapter.clockFill
@@ -158,6 +159,8 @@ Singleton {
             property string searchPlatform: "youtube-music"
             // Size of the cover cards in the centre of the lyrics view (multiplier).
             property real cardsScale: 1.0
+            // Volume of Afterglow's own player (YouTube, SoundCloud tracks), 0-1.
+            property real volume: 0.8
             // Clock: size multiplier; "back" (under the lyrics and cards) or "front"
             // (over everything but the menus); fill "auto" (from the cover), "solid"
             // or "gradient" (clockColor to clockColor2 at clockAngle degrees, 90 =

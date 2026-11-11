@@ -95,7 +95,7 @@ Singleton {
     // ---- catalog.py: one process per request, so a cancelled one can never
     // answer for the next (each knows its own ticket). Each line it prints is a
     // fuller result (SoundCloud: songs first, then albums), shown as it comes;
-    // one that hangs is given up after 25 s.
+    // one that goes 25 s without a word is given up.
 
     property var job: null
     function helperRun(args, t, cb) {
@@ -123,6 +123,7 @@ Singleton {
                     try { d = JSON.parse(line); } catch (e) {}
                     if (!d) return;
                     p.got = true;
+                    p.watchdog.restart();      // still answering: give it more time
                     root.message = "";
                     p.cb(d);
                 }

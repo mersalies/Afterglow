@@ -24,8 +24,6 @@ Singleton {
     property var liked: []
     property var queue: []
     property var openList: null  // { id, name, uri, tracks, loading, message }
-    property var results: []     // search results
-    property string query: ""
     // Short confirmation shown above the transport bar.
     property string notice: ""
 
@@ -33,10 +31,13 @@ Singleton {
 
     // ---- Auth
 
-    property var afterToken: null
+    // Everyone who asked for a fresh token while one is being fetched is answered
+    // by that one fetch (several requests hit an expired token at the same time).
+    // `then` is null for a plain (re)load of the library.
+    property var tokenWaiters: []
     function fetchToken(then) {
-        afterToken = then;
-        tokenProc.running = true;
+        tokenWaiters.push(then);
+        if (!tokenProc.running) tokenProc.running = true;
     }
 
     Process {
@@ -45,19 +46,34 @@ Singleton {
         property string out: ""
         stdout: SplitParser { onRead: line => tokenProc.out = line.trim() }
         onExited: code => {
+            const waiters = root.tokenWaiters;
+            root.tokenWaiters = [];
             if (code === 0 && out) {
                 root.token = out;
                 root.status = "ready";
-                const then = root.afterToken;
-                root.afterToken = null;
-                if (then) then(); else root.loadAll();
-            } else {
+                root.error = "";
+                tokenRetry.stop();
+                if (waiters.includes(null)) root.loadAll();
+            } else if (code === 2) {
                 root.token = "";
-                root.status = code === 2 ? "idle" : "error";
-                if (code !== 2) root.error = "Не удалось обновить вход в Spotify";
+                root.status = "idle";
+            } else {
+                // No network, or Spotify did not answer: the sign-in itself is fine.
+                // Stay signed in when we were, and try again shortly.
+                if (!root.connected) { root.status = "error"; root.error = "Не удалось обновить вход в Spotify"; }
+                waiters.push(null);
+                tokenRetry.restart();
             }
             out = "";
+            // The waiting requests go out again (and report their own failure if any).
+            for (const w of waiters) if (w) w();
+            if (tokenRetry.running) root.tokenWaiters = [null];
         }
+    }
+    Timer {
+        id: tokenRetry
+        interval: 30000
+        onTriggered: if (!tokenProc.running) tokenProc.running = true
     }
 
     function login() {
@@ -85,6 +101,8 @@ Singleton {
 
     function logout() {
         logoutProc.running = true;
+        tokenRetry.stop();
+        tokenWaiters = [];
         cacheFile.setText("{}");
         token = "";
         status = "idle";
@@ -121,12 +139,21 @@ Singleton {
         saveCache.restart();
         console.warn("Afterglow: Spotify limited", apiKey(path), "for", Math.round((until - Date.now()) / 60000), "min");
     }
-    // When the rest is over, load what could not be loaded.
+    // When a rest is over, load what could not be loaded (what is still resting
+    // answers 429 at once, without a request).
     Timer {
         running: root.limitedUntil > 0
         interval: 60000
         repeat: true
-        onTriggered: if (Date.now() > root.limitedUntil) { root.limitedUntil = 0; root.blocked = {}; if (root.connected) root.loadAll(); }
+        onTriggered: {
+            const now = Date.now(), left = {};
+            for (const k in root.blocked) if (root.blocked[k] > now) left[k] = root.blocked[k];
+            if (Object.keys(left).length === Object.keys(root.blocked).length) return;
+            root.blocked = left;
+            root.limitedUntil = Math.max(0, ...Object.values(left));
+            saveCache.restart();
+            if (root.connected) root.loadAll();
+        }
     }
     readonly property string limitText: limitedUntil > Date.now()
         ? "Spotify временно ограничил запросы, до " + new Date(limitedUntil).toLocaleString(Qt.locale("ru_RU"), "d MMMM HH:mm") : ""
@@ -295,8 +322,10 @@ Singleton {
     // All liked songs (up to 5000), in Spotify's order, newest first. One small
     // request first: same count and same newest song as the cache, nothing to do.
     // A failed load keeps what was there.
+    property bool likedPending: false
+    onCacheLoadedChanged: if (cacheLoaded && likedPending) { likedPending = false; loadLiked(); }
     function loadLiked() {
-        if (!cacheLoaded) { Qt.callLater(loadLiked); return; }
+        if (!cacheLoaded) { likedPending = true; return; }
         api("GET", "/me/tracks?limit=1", null, (code, d) => {
             if (code !== 200 || !d) return;
             const newest = trackFrom(d.items?.[0]?.track)?.uri ?? "";
@@ -467,28 +496,6 @@ Singleton {
     }
 
     function playTrack(uri) { play(uri, ""); }
-
-    function addToQueue(t) {
-        if (!t?.uri) return;
-        if (!connected) { say("Очередь работает после подключения Spotify"); return; }
-        api("POST", "/me/player/queue?uri=" + encodeURIComponent(t.uri), null, code => {
-            if (code >= 200 && code < 300) {
-                say("В очереди: " + t.title);
-                refresh.restart();
-            } else {
-                say(code === 404 ? "Сначала включи что-нибудь в Spotify" : "Spotify не дал добавить трек в очередь");
-            }
-        });
-    }
-
-    function search(q) {
-        query = q;
-        if (!connected || q.trim() === "") { results = []; return; }
-        api("GET", "/search?type=track&limit=10&q=" + encodeURIComponent(q), null, (code, d) => {
-            if (q !== query) return;
-            results = code === 200 && d?.tracks ? d.tracks.items.map(trackFrom).filter(t => t) : [];
-        });
-    }
 
     function say(text) {
         notice = text;
