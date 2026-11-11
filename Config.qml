@@ -68,7 +68,7 @@ Singleton {
     property alias clockClipY: adapter.clockClipY
 
     // The three looks of the window, in the order the mode button steps through.
-    readonly property var views: [["lyrics", "Текст"], ["covers", "Обложки"], ["stage", "Сцена"]]
+    readonly property var views: [["lyrics", "Текст"], ["stage", "Сцена"], ["covers", "Обложки"]]
     function viewName(v) { return (views.find(x => x[0] === v) ?? views[0])[1]; }
     function cycleView() {
         view = views[(Math.max(0, views.findIndex(x => x[0] === view)) + 1) % views.length][0];

@@ -254,7 +254,7 @@ FloatingWindow {
             readonly property real cx0: libDocked ? m + libW + (lyricsView ? 40 : 16) : m
             readonly property real cx1: lyrShown ? width - m - lyrW - 16 : width - m
             readonly property real panelBottom: search.y - 16
-            property real tilt: floatSide ? 16 : 0
+            property real tilt: floatSide ? 25 : 0
             Behavior on tilt { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
 
             component Ease: NumberAnimation { duration: 520; easing.type: Easing.OutCubic }
@@ -486,6 +486,7 @@ FloatingWindow {
                     onSettingsClicked: { settingsMenu.open = !settingsMenu.open; glowMenu.open = false; styleMenu.open = false; }
                     onSearchClicked: builder.show("")
                     onModeClicked: Config.cycleView()
+                    onLyricsModeClicked: Config.view = "lyrics"
                 }
             }
 
@@ -518,7 +519,9 @@ FloatingWindow {
                     : full.lyricsView && full.libDocked ? (full.libUnderClock ? full.clockAutoY + clock.height * 0.84 : full.clockAutoY) : full.m
                 width: full.floatSide && full.libDocked ? full.dockW : full.libW
                 height: (full.stage && full.libDocked ? full.height - full.m : full.lyricsView && full.libDocked ? bar.y + bar.height : full.panelBottom) - y
-                x: !Config.showLibrary ? -width - 40 : full.stage && full.libDocked ? full.m + 12
+                // On the stage it stands close to the covers, its far edge over the first of them.
+                x: !Config.showLibrary ? -width - 40
+                    : full.stage && full.libDocked ? Math.max(full.m + 12, full.width / 2 - (stageDeck.item?.cardSize ?? 280) * 1.55 - width * 0.9 + 60)
                     : full.lyricsView && full.libDocked ? full.dockX : full.m
                 Behavior on width { Ease {} }
                 opacity: Config.showLibrary ? 1 : 0

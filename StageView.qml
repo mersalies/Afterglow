@@ -13,12 +13,14 @@ Item {
     signal settingsClicked
     signal searchClicked
     signal modeClicked
+    signal lyricsModeClicked
 
     // Where the search sheet grows from, and where the menus open (our coordinates).
     readonly property rect searchSpot: Qt.rect(tools.x + searchBtn.x, tools.y, searchBtn.width, searchBtn.height)
     readonly property real rowX: row.x
     readonly property real rowY: row.y
     readonly property real rowW: row.width
+    readonly property real cardSize: flow.item?.cardSize ?? 280
 
     readonly property real colW: Math.max(420, Math.min(width * 0.54, 900))
     readonly property color glow: Qt.lighter(Player.accent, 1.2)
@@ -177,7 +179,8 @@ Item {
         y: curve.y + curve.height + 6
         spacing: 10
         Round { id: searchBtn; icon: "search"; tooltip: "Поиск (Q)"; onClicked: root.searchClicked() }
-        Round { icon: "covers"; tooltip: "Сменить режим (V)"; onClicked: root.modeClicked() }
+        Round { icon: "lyrics"; tooltip: "Режим «Текст»: слова песни по центру"; onClicked: root.lyricsModeClicked() }
+        Round { icon: "covers"; tooltip: "Следующий режим (V)"; onClicked: root.modeClicked() }
         Round { icon: "gear"; tooltip: "Настройки"; onClicked: root.settingsClicked() }
     }
 
