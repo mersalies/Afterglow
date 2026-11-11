@@ -31,7 +31,7 @@ FloatingWindow {
 
         Keys.onPressed: e => {
             const ctrl = e.modifiers & Qt.ControlModifier;
-            if (e.key === Qt.Key_Escape) { menu.open = false; styleMenu.open = false; glowMenu.open = false; settingsMenu.open = false; builder.hide(); }
+            if (e.key === Qt.Key_Escape) { Config.editLayout = false; menu.open = false; styleMenu.open = false; glowMenu.open = false; settingsMenu.open = false; builder.hide(); }
             else if (e.key === Qt.Key_Space) Player.toggle();
             else if (e.key === Qt.Key_Right && ctrl) Player.next();
             else if (e.key === Qt.Key_Left && ctrl) Player.previous();
@@ -530,12 +530,47 @@ FloatingWindow {
                 Behavior on x { Ease {} }
                 Behavior on y { Ease {} }
                 Behavior on opacity { NumberAnimation { duration: 300 } }
-                transform: Rotation {
-                    origin.x: 0
-                    origin.y: library.height / 2
-                    axis { x: 0; y: 1; z: 0 }
-                    angle: full.libDocked ? full.tilt : 0
-                    distanceToPlane: 1200
+                transform: [
+                    Rotation {
+                        origin.x: 0
+                        origin.y: library.height / 2
+                        axis { x: 0; y: 1; z: 0 }
+                        angle: full.libDocked ? full.tilt : 0
+                        distanceToPlane: 1200
+                    },
+                    Translate {
+                        x: full.stage ? Config.posListX * full.width : 0
+                        y: full.stage ? Config.posListY * full.height : 0
+                    }
+                ]
+                Movable { visible: Config.editLayout && full.stage; key: "posList"; label: "Список"; span: full }
+            }
+
+            // "Move blocks" is on: say so, and offer the way out.
+            Glass {
+                z: 80
+                visible: Config.editLayout
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: full.m
+                width: editRow.implicitWidth + 28
+                height: 44
+                radius: 22
+                color: Theme.menuColor(0.95)
+                Row {
+                    id: editRow
+                    anchors.centerIn: parent
+                    spacing: 10
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: full.stage ? "Перетащи блоки куда нужно. Двойной клик по блоку — на место."
+                                         : "Блоки двигаются в режиме «Сцена»."
+                        font.family: Theme.font
+                        font.pixelSize: 13
+                        color: Theme.text
+                    }
+                    Pill { anchors.verticalCenter: parent.verticalCenter; visible: !full.stage; label: "В «Сцену»"; onClicked: Config.view = "stage" }
+                    Pill { anchors.verticalCenter: parent.verticalCenter; icon: "refresh"; label: "Сбросить"; onClicked: Config.resetLayout() }
+                    Pill { anchors.verticalCenter: parent.verticalCenter; icon: "check"; label: "Готово"; onClicked: Config.editLayout = false }
                 }
             }
 

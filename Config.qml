@@ -47,6 +47,27 @@ Singleton {
     property alias searchPlatform: adapter.searchPlatform
     property alias cardsScale: adapter.cardsScale
     property alias volume: adapter.volume
+    property alias stageStyle: adapter.stageStyle
+    property alias stageFocus: adapter.stageFocus
+    property alias posDeckX: adapter.posDeckX
+    property alias posDeckY: adapter.posDeckY
+    property alias posSeekX: adapter.posSeekX
+    property alias posSeekY: adapter.posSeekY
+    property alias posControlsX: adapter.posControlsX
+    property alias posControlsY: adapter.posControlsY
+    property alias posListX: adapter.posListX
+    property alias posListY: adapter.posListY
+
+    // "Move blocks" in the settings: the stage's blocks can be dragged. Not saved.
+    property bool editLayout: false
+    readonly property var stageStyles: [["arc", "Дуга"], ["row", "Ряд"], ["dial", "Диск"]]
+    function cycleStageStyle() {
+        stageStyle = stageStyles[(Math.max(0, stageStyles.findIndex(x => x[0] === stageStyle)) + 1) % stageStyles.length][0];
+        Spotify.say("Сцена: " + stageStyles.find(x => x[0] === stageStyle)[1]);
+    }
+    function resetLayout() {
+        for (const k of ["Deck", "Seek", "Controls", "List"]) { root["pos" + k + "X"] = 0; root["pos" + k + "Y"] = 0; }
+    }
     property alias clockScale: adapter.clockScale
     property alias clockLayer: adapter.clockLayer
     property alias clockFill: adapter.clockFill
@@ -169,6 +190,20 @@ Singleton {
             property real cardsScale: 1.0
             // Volume of Afterglow's own player (YouTube, SoundCloud tracks), 0-1.
             property real volume: 0.8
+            // The stage view: how the covers stand ("arc" on a shelf, "row" flat,
+            // "dial" a disc with a ring), whether it shows one cover with the
+            // lyric line beside it, and where its blocks were dragged (shares of
+            // the window, 0 = their own place).
+            property string stageStyle: "arc"
+            property bool stageFocus: false
+            property real posDeckX: 0
+            property real posDeckY: 0
+            property real posSeekX: 0
+            property real posSeekY: 0
+            property real posControlsX: 0
+            property real posControlsY: 0
+            property real posListX: 0
+            property real posListY: 0
             // Clock: size multiplier; "back" (under the lyrics and cards) or "front"
             // (over everything but the menus); fill "auto" (from the cover), "solid"
             // or "gradient" (clockColor to clockColor2 at clockAngle degrees, 90 =

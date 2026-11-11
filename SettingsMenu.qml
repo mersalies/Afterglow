@@ -322,6 +322,24 @@ Glass {
                     value: Config.cardsScale; onChanged: v => Config.cardsScale = v
                 }
 
+                SettingHeading { text: "Режим «Сцена»" }
+                Segments {
+                    width: parent.width
+                    options: Config.stageStyles
+                    value: Config.stageStyle
+                    onPicked: v => Config.stageStyle = v
+                }
+                SettingSwitch {
+                    label: "Одна обложка и строка текста"
+                    checked: Config.stageFocus
+                    onToggled: c => Config.stageFocus = c
+                }
+                SettingSwitch {
+                    label: "Двигать блоки"
+                    checked: Config.editLayout
+                    onToggled: c => { Config.editLayout = c; if (c) { if (Config.view !== "stage") Config.view = "stage"; root.open = false; } }
+                }
+
                 SettingHeading { text: "Текст в центре" }
                 SettingSlider {
                     label: "Размер"; from: 0.5; to: 1.8; unit: "×"
