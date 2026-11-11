@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Shapes
 
 // The "stage" view: nothing but the backdrop, and on it three blocks: the covers
-// (a shelf, a flat row or a disc; or one cover with the line being sung), the
+// (a shelf or a disc; or one cover with the line being sung), the
 // progress line with the tools, and the track's name over one row of borderless
 // controls. No bars, no panels. With "move blocks" on in the settings each
 // block can be dragged where you like.
@@ -28,7 +28,7 @@ Item {
     readonly property real colW: Math.max(420, Math.min(width * 0.54, 900))
     readonly property color glow: Qt.lighter(Player.accent, 1.2)
 
-    readonly property string style: ["arc", "row", "dial"].includes(Config.stageStyle) ? Config.stageStyle : "arc"
+    readonly property string style: Config.stageStyle === "dial" ? "dial" : "arc"
     readonly property bool solo: Config.stageFocus
 
     // Wheel anywhere below the covers: volume.
@@ -37,7 +37,7 @@ Item {
         onWheel: e => { if (e.y > seekBox.y) Player.setVolume(Player.volume + (e.angleDelta.y > 0 ? 0.05 : -0.05)); }
     }
 
-    // ---- Block 1: the covers. A shelf ("arc"), a flat row ("row") or a disc
+    // ---- Block 1: the covers. A shelf ("arc") or a disc
     // ("dial"); or one cover with the line being sung beside it (focus).
     Item {
         id: deckBox
@@ -47,37 +47,13 @@ Item {
         height: Math.max(120, seekBox.y - y - 8)
         transform: Translate { x: Config.posDeckX * root.width; y: Config.posDeckY * root.height }
 
-        // Row style: the track's name over the covers.
-        Column {
-            visible: root.style === "row" && !root.solo
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: -6
-            spacing: 1
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: Player.title
-                font.family: Theme.font
-                font.pixelSize: 15
-                font.weight: Font.Bold
-                color: Theme.text
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: Player.artist
-                font.family: Theme.font
-                font.pixelSize: 11
-                color: Theme.textSecondary
-            }
-        }
-
         Loader {
             id: flow
             anchors.fill: parent
-            anchors.topMargin: root.style === "row" && !root.solo ? 34 : 0
             active: root.visible
             sourceComponent: root.solo ? focusComp : root.style === "dial" ? dialComp : flowComp
         }
-        Component { id: flowComp; CoverFlow { bare: true; flat: root.style === "row" } }
+        Component { id: flowComp; CoverFlow { bare: true } }
         Component { id: dialComp; DialDeck {} }
         Component {
             id: focusComp
@@ -168,11 +144,11 @@ Item {
         Item {
             id: curve
             width: parent.width
-            height: 44
+            height: 64
             visible: root.style !== "dial" || root.solo
 
-            // "arc": the line sags like the edge of the floor under the covers.
-            readonly property real sag: root.style === "arc" ? 16 : 0
+            // The line sags deep, like the edge of the floor under the covers.
+            readonly property real sag: 40
             readonly property real pad: 44          // room for the times at both ends
             readonly property real x0: pad
             readonly property real x1: width - pad
@@ -287,7 +263,7 @@ Item {
             y: curve.height + 6
             spacing: 10
             Round { id: searchBtn; icon: "search"; tooltip: "Поиск (Q)"; onClicked: root.searchClicked() }
-            Round { icon: "covers"; tooltip: "Вид обложек: дуга, ряд, диск"; onClicked: Config.cycleStageStyle() }
+            Round { icon: "covers"; tooltip: root.style === "dial" ? "Обложки дугой" : "Обложка диском"; onClicked: Config.cycleStageStyle() }
             Round { icon: "music"; toggled: Config.stageFocus; tooltip: "Одна обложка и строка текста"; onClicked: Config.stageFocus = !Config.stageFocus }
             Round { icon: "lyrics"; tooltip: "Режим «Текст»: слова песни по центру (V)"; onClicked: root.lyricsModeClicked() }
             Round { icon: "gear"; tooltip: "Настройки"; onClicked: root.settingsClicked() }
@@ -392,7 +368,7 @@ Item {
                     }
                 }
                 IconButton { icon: "library"; size: 34; iconSize: 17; toggled: Config.showLibrary; tooltip: "Библиотека (B)"; onClicked: Config.showLibrary = !Config.showLibrary }
-                IconButton { icon: "queue"; size: 34; iconSize: 17; tooltip: "Добавить в очередь (Q)"; onClicked: root.searchClicked() }
+                IconButton { icon: "heart"; size: 34; iconSize: 17; toggled: Likes.current; tooltip: Likes.hint; enabled: Player.title !== ""; onClicked: Likes.toggle() }
             }
 
             Row {

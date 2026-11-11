@@ -49,6 +49,7 @@ Singleton {
     property alias volume: adapter.volume
     property alias stageStyle: adapter.stageStyle
     property alias stageFocus: adapter.stageFocus
+    property alias libraryTab: adapter.libraryTab
     property alias posDeckX: adapter.posDeckX
     property alias posDeckY: adapter.posDeckY
     property alias posSeekX: adapter.posSeekX
@@ -60,7 +61,7 @@ Singleton {
 
     // "Move blocks" in the settings: the stage's blocks can be dragged. Not saved.
     property bool editLayout: false
-    readonly property var stageStyles: [["arc", "Дуга"], ["row", "Ряд"], ["dial", "Диск"]]
+    readonly property var stageStyles: [["arc", "Дуга"], ["dial", "Диск"]]
     function cycleStageStyle() {
         stageStyle = stageStyles[(Math.max(0, stageStyles.findIndex(x => x[0] === stageStyle)) + 1) % stageStyles.length][0];
         Spotify.say("Сцена: " + stageStyles.find(x => x[0] === stageStyle)[1]);
@@ -190,12 +191,14 @@ Singleton {
             property real cardsScale: 1.0
             // Volume of Afterglow's own player (YouTube, SoundCloud tracks), 0-1.
             property real volume: 0.8
-            // The stage view: how the covers stand ("arc" on a shelf, "row" flat,
-            // "dial" a disc with a ring), whether it shows one cover with the
+            // The stage view: how the covers stand ("arc" on a shelf, "dial" a disc
+            // with a ring), whether it shows one cover with the
             // lyric line beside it, and where its blocks were dragged (shares of
             // the window, 0 = their own place).
             property string stageStyle: "arc"
             property bool stageFocus: false
+            // The tab the left panel was left on: "next", "history" or "library".
+            property string libraryTab: "history"
             property real posDeckX: 0
             property real posDeckY: 0
             property real posSeekX: 0

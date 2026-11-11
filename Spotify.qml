@@ -348,6 +348,32 @@ Singleton {
         });
     }
 
+    // Add a track to (or take it out of) the user's liked songs. Spotify's newer
+    // API saves through /me/library; the older one through /me/tracks.
+    function setLiked(t, on) {
+        const id = t.uri.split(":").pop();
+        const method = on ? "PUT" : "DELETE";
+        const done = code => {
+            if (code >= 200 && code < 300) {
+                liked = on ? [Object.assign({}, t, { source: "spotify" })].concat(liked.filter(x => x.uri !== t.uri))
+                           : liked.filter(x => x.uri !== t.uri);
+                likedTotal = liked.length;
+                saveCache.restart();
+                say(on ? "В любимых Spotify: " + t.title : "Убрано из любимых Spotify");
+            } else if (code === 401 || code === 403) {
+                say("Лайки в Spotify: выйди и войди заново, нужно новое разрешение");
+            } else if (code === 429) {
+                say("Spotify ограничил запросы, попробуй позже");
+            } else {
+                say("Spotify не принял лайк");
+            }
+        };
+        api(method, "/me/library?uris=" + encodeURIComponent(t.uri), null, code => {
+            if (code === 404 || code === 400 || code === 405) api(method, "/me/tracks?ids=" + id, null, done);
+            else done(code);
+        });
+    }
+
     function loadQueue() {
         if (!connected) return;
         api("GET", "/me/player/queue", null, (code, d) => {

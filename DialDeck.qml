@@ -15,13 +15,44 @@ Item {
     readonly property color glow: Qt.lighter(Player.accent, 1.2)
 
     readonly property bool ownQueue: Queue.items.length > 0
-    readonly property var around: {
+    // Everything that can stand around the ring; seven show at a time, the
+    // wheel turns the fan through the rest.
+    readonly property var all: {
         const next = ownQueue ? Queue.items
             : Spotify.connected && Player.source === "spotify" ? Spotify.queue : [];
-        if (next.length) return next.slice(0, 7).map((t, i) => ({ t, kind: ownQueue ? "queue" : "next", i }));
+        if (next.length) return next.slice(0, 40).map((t, i) => ({ t, kind: ownQueue ? "queue" : "next", i }));
         return History.tracks.filter(t => !(t.title === Player.title && t.artist === Player.artist))
-            .slice(0, 7).map((t, i) => ({ t, kind: "past", i }));
+            .slice(0, 40).map((t, i) => ({ t, kind: "past", i }));
     }
+    readonly property int shown: 7
+    property int shift: 0
+    onAllChanged: shift = Math.max(0, Math.min(shift, all.length - shown))
+    readonly property var around: all.slice(shift, shift + shown)
+    // The fan swings a step as it turns, then settles.
+    property real swing: 0
+    Behavior on swing { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+    function turn(by) {
+        const to = Math.max(0, Math.min(all.length - shown, shift + by));
+        if (to === shift) return;
+        swing = by > 0 ? 18 : -18;
+        shift = to;
+        Qt.callLater(() => swing = 0);
+    }
+    WheelHandler {
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        onWheel: e => { if (Math.abs(e.angleDelta.y) >= 60) dial.turn(e.angleDelta.y > 0 ? -1 : 1); }
+    }
+
+    // The beat: the disc swells with the bass, and a kick throws a ring outwards.
+    property real kick: 0
+    NumberAnimation on kick { id: kickFade; to: 0; duration: 520; easing.type: Easing.OutCubic; running: false }
+    Connections {
+        target: Audio
+        enabled: dial.visible && Player.isPlaying
+        function onKicked(strength) { dial.kick = Math.min(1, 0.45 + strength * 0.6); kickFade.restart(); }
+    }
+    property real bass: Player.isPlaying ? Audio.bass : 0
+    Behavior on bass { NumberAnimation { duration: 110 } }
 
     // Ring: click or drag around it to seek (12 o'clock is the start).
     MouseArea {
@@ -53,9 +84,20 @@ Item {
             fillColor: "transparent"
             PathAngleArc { centerX: dial.cx; centerY: dial.cy; radiusX: dial.ringR; radiusY: dial.ringR; startAngle: 0; sweepAngle: 360 }
         }
+        // The ring a kick throws out.
+        ShapePath {
+            strokeColor: Qt.rgba(dial.glow.r, dial.glow.g, dial.glow.b, dial.kick * 0.7)
+            strokeWidth: 2 + dial.kick * 5
+            fillColor: "transparent"
+            PathAngleArc {
+                centerX: dial.cx; centerY: dial.cy
+                radiusX: dial.ringR + 4 + (1 - dial.kick) * dial.d * 0.09; radiusY: radiusX
+                startAngle: 0; sweepAngle: 360
+            }
+        }
         ShapePath {
             strokeColor: dial.glow
-            strokeWidth: 3
+            strokeWidth: 3 + dial.bass * 4
             fillColor: "transparent"
             capStyle: ShapePath.RoundCap
             PathAngleArc {
@@ -76,8 +118,7 @@ Item {
         color: Qt.lighter(Player.tint, 1.6)
         border.width: 3
         border.color: Qt.rgba(1, 1, 1, 0.55)
-        scale: 1 + (Player.isPlaying ? Audio.bass * 0.02 : 0)
-        Behavior on scale { NumberAnimation { duration: 120 } }
+        scale: 1 + dial.bass * 0.045 + dial.kick * 0.025
 
         CrossfadeImage {
             anchors.fill: parent
@@ -139,7 +180,7 @@ Item {
             required property int index
             readonly property int n: dial.around.length
             // -64°..64° around 3 o'clock, top first.
-            readonly property real deg: n <= 1 ? 0 : -64 + 128 * index / (n - 1)
+            readonly property real deg: (n <= 1 ? 0 : -64 + 128 * index / (n - 1)) + dial.swing
             readonly property real rad: deg * Math.PI / 180
             readonly property real r: dial.ringR + 14 + size / 2
             readonly property real size: Math.max(26, dial.d * 0.13)
@@ -147,8 +188,7 @@ Item {
             y: dial.cy + r * Math.sin(rad)
             rotation: deg
             opacity: hover.hovered ? 1 : 0.82
-            scale: hover.hovered ? 1.12 : 1
-            Behavior on scale { NumberAnimation { duration: Theme.quick } }
+            scale: (hover.hovered ? 1.12 : 1) + dial.kick * 0.05
 
             ClippingRectangle {
                 id: thumb
@@ -168,6 +208,7 @@ Item {
                 }
             }
             Text {
+                id: name
                 x: spoke.size / 2 + 8
                 anchors.verticalCenter: thumb.verticalCenter
                 width: Math.min(implicitWidth, dial.d * 0.55)
@@ -180,13 +221,20 @@ Item {
                 style: Text.Raised
                 styleColor: Qt.rgba(0, 0, 0, 0.6)
             }
-            HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-            TapHandler {
-                onTapped: {
-                    const m = spoke.modelData;
-                    if (m.kind === "queue") Queue.playAt(m.i);
-                    else if (m.kind === "next") Queue.playNow(m.t);
-                    else History.play(m.t);
+            // The spoke itself has no size: this is what the pointer hits.
+            Item {
+                x: -spoke.size / 2
+                y: -spoke.size / 2
+                width: spoke.size + 8 + name.width
+                height: spoke.size
+                HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+                TapHandler {
+                    onTapped: {
+                        const m = spoke.modelData;
+                        if (m.kind === "queue") Queue.playAt(m.i);
+                        else if (m.kind === "next") Queue.playNow(m.t);
+                        else History.play(m.t);
+                    }
                 }
             }
         }

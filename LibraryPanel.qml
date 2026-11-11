@@ -6,7 +6,8 @@ Glass {
     id: root
 
     // "next" | "history" | "library"
-    property string tab: "history"
+    property string tab: ["next", "history", "library"].includes(Config.libraryTab) ? Config.libraryTab : "history"
+    onTabChanged: if (Config.libraryTab !== tab) Config.libraryTab = tab
     // No glass sheet: rows float on the field, the playing one raised as a card.
     property bool floating: false
 
@@ -46,6 +47,9 @@ Glass {
             out.push({ kind: "list", id: "ytm-liked", title: "Понравившиеся", sub: Accounts.ytmLiked.length + " треков",
                        art: Accounts.ytmLiked[0].art, tracks: Accounts.ytmLiked });
         }
+        const hearts = Likes.of(service).filter(t => t.uri);
+        if (!closedService && hearts.length)
+            out.push({ kind: "list", id: "hearts", title: "Любимые в Afterglow", sub: hearts.length + " треков", art: hearts[0].art, tracks: hearts });
         const played = serviceHistory.filter(h => h.uri);
         if (!closedService && played.length)
             out.push({ kind: "list", id: "history", title: "Из истории", sub: played.length + " треков", art: played[0].art, tracks: played });

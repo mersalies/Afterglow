@@ -254,7 +254,7 @@ FloatingWindow {
             readonly property real cx0: libDocked ? m + libW + (lyricsView ? 40 : 16) : m
             readonly property real cx1: lyrShown ? width - m - lyrW - 16 : width - m
             readonly property real panelBottom: search.y - 16
-            property real tilt: floatSide ? 25 : 0
+            property real tilt: floatSide ? 33 : 0
             Behavior on tilt { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
 
             component Ease: NumberAnimation { duration: 520; easing.type: Easing.OutCubic }
@@ -545,11 +545,40 @@ FloatingWindow {
                 ]
                 Movable { visible: Config.editLayout && full.stage; key: "posList"; label: "Список"; span: full }
             }
+            // Leaving the stage ends the moving.
+            Connections {
+                target: full
+                function onStageChanged() { if (!full.stage) Config.editLayout = false; }
+            }
+
+            // Top left corner of the stage: move the blocks, and stop moving them.
+            IconButton {
+                z: 81
+                x: full.m
+                y: full.m
+                visible: full.stage
+                opacity: Config.editLayout || windowHover.hovered ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 300 } }
+                icon: "move"
+                size: 38
+                iconSize: 18
+                toggled: Config.editLayout
+                tooltip: Config.editLayout ? "Закончить: блоки останутся на местах" : "Двигать блоки"
+                onClicked: Config.editLayout = !Config.editLayout
+                Rectangle {
+                    z: -1
+                    anchors.fill: parent
+                    radius: width / 2
+                    color: Qt.rgba(0, 0, 0, 0.32)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.14)
+                }
+            }
 
             // "Move blocks" is on: say so, and offer the way out.
             Glass {
                 z: 80
-                visible: Config.editLayout
+                visible: Config.editLayout && full.stage
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: full.m
                 width: editRow.implicitWidth + 28
@@ -562,13 +591,11 @@ FloatingWindow {
                     spacing: 10
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: full.stage ? "Перетащи блоки куда нужно. Двойной клик по блоку — на место."
-                                         : "Блоки двигаются в режиме «Сцена»."
+                        text: "Перетащи блоки куда нужно. Двойной клик по блоку — на место."
                         font.family: Theme.font
                         font.pixelSize: 13
                         color: Theme.text
                     }
-                    Pill { anchors.verticalCenter: parent.verticalCenter; visible: !full.stage; label: "В «Сцену»"; onClicked: Config.view = "stage" }
                     Pill { anchors.verticalCenter: parent.verticalCenter; icon: "refresh"; label: "Сбросить"; onClicked: Config.resetLayout() }
                     Pill { anchors.verticalCenter: parent.verticalCenter; icon: "check"; label: "Готово"; onClicked: Config.editLayout = false }
                 }

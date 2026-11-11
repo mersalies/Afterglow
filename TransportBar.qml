@@ -254,7 +254,15 @@ Glass {
             Item { width: 8; height: 1 }
         }
 
-        // Content: how the lyrics move, the library, which view.
+        // Content: like, how the lyrics move, the library, which view.
+        IconButton {
+            icon: "heart"
+            size: root.compact ? 34 : 38
+            toggled: Likes.current
+            enabled: Player.title !== ""
+            tooltip: Likes.hint
+            onClicked: Likes.toggle()
+        }
         IconButton {
             id: styleBtn
             icon: "style"

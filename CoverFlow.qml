@@ -32,10 +32,7 @@ Item {
     // Bare (the stage view): square covers without captions, the side ones turned
     // away steeply and packed close, as on a shelf.
     property bool bare: false
-    // Flat (with bare): all covers face on in one row, the middle one larger.
-    property bool flat: false
-    readonly property real cardSize: flat ? Math.min(height * 0.82, width * 0.2, 340)
-                                          : bare ? Math.min(height * 0.86, width * 0.3, 420)
+    readonly property real cardSize: bare ? Math.min(height * 0.86, width * 0.3, 420)
                                           : Math.min(height / 1.24 * 0.92, width * 0.32, 460)
 
     function go(delta) {
@@ -94,13 +91,12 @@ Item {
                   + flow.cardSize * 0.075 * Math.pow(Math.min(a, 3.2), 1.5)
             rotation: flow.bare ? 0 : Math.max(-9, Math.min(9, off * 3))
             x: flow.width / 2 - width / 2
-                + Math.sign(off) * (flow.flat ? Math.min(a, 1) * flow.cardSize * 0.92 + Math.max(0, a - 1) * flow.cardSize * 0.74
-                                              : flow.bare ? Math.min(a, 1) * flow.cardSize * 0.74 + Math.max(0, a - 1) * flow.cardSize * 0.3
+                + Math.sign(off) * (flow.bare ? Math.min(a, 1) * flow.cardSize * 0.74 + Math.max(0, a - 1) * flow.cardSize * 0.3
                                               : Math.min(a, 1) * flow.cardSize * 0.78 + Math.max(0, a - 1) * flow.cardSize * 0.36)
             z: 100 - a * 10
-            scale: (flow.flat ? 1 - Math.min(a, 1) * 0.3 : flow.bare ? 1 - Math.min(a, 1) * 0.16 - Math.max(0, Math.min(a, 3) - 1) * 0.05 : 1 - Math.min(a, 3) * 0.13)
+            scale: (flow.bare ? 1 - Math.min(a, 1) * 0.16 - Math.max(0, Math.min(a, 3) - 1) * 0.05 : 1 - Math.min(a, 3) * 0.13)
                    * (hover.hovered && !centre ? 1.03 : 1)
-            opacity: a > 3.6 ? 0 : 1 - Math.max(0, a - (flow.flat ? 2.6 : 2.2)) * 0.7
+            opacity: a > 3.6 ? 0 : 1 - Math.max(0, a - 2.2) * 0.7
             visible: opacity > 0.01
 
             Behavior on scale { NumberAnimation { duration: Theme.quick } }
@@ -109,7 +105,7 @@ Item {
                 origin.x: card.width / 2
                 origin.y: card.height / 2
                 axis { x: 0; y: 1; z: 0 }
-                angle: flow.flat ? 0 : flow.bare ? Math.max(-58, Math.min(58, -card.off * 58)) : Math.max(-48, Math.min(48, -card.off * 34))
+                angle: flow.bare ? Math.max(-58, Math.min(58, -card.off * 58)) : Math.max(-48, Math.min(48, -card.off * 34))
                 distanceToPlane: 1400
             }
 

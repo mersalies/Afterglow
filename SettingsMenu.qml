@@ -12,6 +12,9 @@ Glass {
     id: root
 
     property bool open: false
+    // The part of the "Вид" and "Часы" tabs on show.
+    property string viewPart: "centre"
+    property string clockPart: "where"
     property real maxHeight: 600
     property string tab: "view"
     // The clock scene on screen now ("Lyrics", "Covers", "Clip"), for the Часы tab.
@@ -117,44 +120,8 @@ Glass {
         }
     }
 
-    // A row of colour swatches: "accent" (the cover's colour) and fixed colours.
-    component Swatches: Flow {
-        id: sw
-        property string value
-        signal picked(string value)
-        width: parent ? parent.width : 300
-        spacing: 7
-        Repeater {
-            model: ["accent", "#ffffff", "#c7c7cc", "#1c1c1e", "#000000", "#ff453a", "#ff9f0a", "#ffd60a",
-                    "#30d158", "#64d2ff", "#0a84ff", "#5e5ce6", "#bf5af2", "#ff375f"]
-            Rectangle {
-                required property string modelData
-                readonly property bool on: sw.value.toLowerCase() === modelData
-                width: 26
-                height: 26
-                radius: 13
-                color: modelData === "accent" ? Player.accent : modelData
-                border.width: on ? 2 : 1
-                border.color: on ? "white" : Qt.rgba(1, 1, 1, 0.25)
-                scale: swArea.containsMouse ? 1.12 : 1
-                Behavior on scale { NumberAnimation { duration: 120 } }
-                Icon {
-                    anchors.centerIn: parent
-                    visible: modelData === "accent"
-                    kind: "glow"
-                    size: 14
-                    color: "white"
-                }
-                MouseArea {
-                    id: swArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: sw.picked(modelData)
-                }
-            }
-        }
-    }
+    // A colour: swatches, and a wheel with RGB lines behind the rainbow one.
+    component Swatches: ColorPick {}
 
     component Label: Text {
         font.family: Theme.font
@@ -300,125 +267,137 @@ Glass {
                 spacing: 6
                 visible: root.tab === "view"
 
-                SettingHeading { text: "Центр экрана" }
+                // One part of the tab at a time.
                 Segments {
                     width: parent.width
-                    options: [["lyrics", "Текст"], ["auto", "Авто"], ["cards", "Карточки"]]
-                    value: Config.centerMode
-                    onPicked: v => Config.centerMode = v
+                    height: 30
+                    color: "transparent"
+                    options: [["centre", "Центр"], ["text", "Текст"], ["back", "Фон"], ["glass", "Стекло"]]
+                    value: root.viewPart
+                    onPicked: v => root.viewPart = v
                 }
-                SettingSlider {
-                    visible: Config.centerMode === "auto"
-                    label: "Карточки появляются через"; from: 0; to: 3; unit: " с"
-                    value: Config.cardsShowDelay; onChanged: v => Config.cardsShowDelay = v
-                }
-                SettingSlider {
-                    visible: Config.centerMode === "auto"
-                    label: "Текст возвращается через"; from: 1; to: 30; unit: " с"; decimals: 0
-                    value: Config.cardsHideDelay; onChanged: v => Config.cardsHideDelay = Math.round(v)
-                }
-                SettingSlider {
-                    label: "Размер карточек"; from: 0.6; to: 1.8; unit: "×"
-                    value: Config.cardsScale; onChanged: v => Config.cardsScale = v
-                }
+                Item { width: 1; height: 4 }
 
-                SettingHeading { text: "Режим «Сцена»" }
-                Segments {
+                Column {
                     width: parent.width
-                    options: Config.stageStyles
-                    value: Config.stageStyle
-                    onPicked: v => Config.stageStyle = v
-                }
-                SettingSwitch {
-                    label: "Одна обложка и строка текста"
-                    checked: Config.stageFocus
-                    onToggled: c => Config.stageFocus = c
-                }
-                SettingSwitch {
-                    label: "Двигать блоки"
-                    checked: Config.editLayout
-                    onToggled: c => { Config.editLayout = c; if (c) { if (Config.view !== "stage") Config.view = "stage"; root.open = false; } }
+                    spacing: 6
+                    visible: root.viewPart === "centre"
+                    Segments {
+                        width: parent.width
+                        options: [["lyrics", "Текст"], ["auto", "Авто"], ["cards", "Карточки"]]
+                        value: Config.centerMode
+                        onPicked: v => Config.centerMode = v
+                    }
+                    SettingSlider {
+                        visible: Config.centerMode === "auto"
+                        label: "Карточки появляются через"; from: 0; to: 3; unit: " с"
+                        value: Config.cardsShowDelay; onChanged: v => Config.cardsShowDelay = v
+                    }
+                    SettingSlider {
+                        visible: Config.centerMode === "auto"
+                        label: "Текст возвращается через"; from: 1; to: 30; unit: " с"; decimals: 0
+                        value: Config.cardsHideDelay; onChanged: v => Config.cardsHideDelay = Math.round(v)
+                    }
+                    SettingSlider {
+                        label: "Размер карточек"; from: 0.6; to: 1.8; unit: "×"
+                        value: Config.cardsScale; onChanged: v => Config.cardsScale = v
+                    }
+
                 }
 
-                SettingHeading { text: "Текст в центре" }
-                SettingSlider {
-                    label: "Размер"; from: 0.5; to: 1.8; unit: "×"
-                    value: Config.lyricsScale; onChanged: v => Config.lyricsScale = v
-                }
-
-                Text {
-                    text: "Шрифт"
-                    font.family: Theme.font
-                    font.pixelSize: 13
-                    font.weight: Font.DemiBold
-                    color: Theme.text
-                }
-                Field {
-                    id: fontFilter
-                    placeholder: "Найти шрифт…"
-                }
-
-                ListView {
-                    id: fonts
+                Column {
                     width: parent.width
-                    height: 190
-                    clip: true
-                    boundsBehavior: Flickable.StopAtBounds
-                    // The bundled face first, then everything installed, filtered.
-                    readonly property var all: [""].concat(Qt.fontFamilies().filter(f => !/emoji|symbol|math|mono|icons|awesome|nerd/i.test(f)))
-                    model: all.filter(f => !fontFilter.text || (f || Theme.bundledDisplay).toLowerCase().includes(fontFilter.text.toLowerCase()))
-                    delegate: Item {
-                        required property string modelData
-                        readonly property bool selected: Config.lyricsFont === modelData
-                        width: fonts.width
-                        height: 40
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 10
-                            color: parent.selected ? Qt.rgba(1, 1, 1, 0.14) : fontArea.containsMouse ? Theme.hover : "transparent"
-                        }
-                        Text {
-                            x: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width - 20
-                            elide: Text.ElideRight
-                            text: (parent.modelData || Theme.bundledDisplay) + "  ·  Текст песни"
-                            font.family: parent.modelData || Theme.bundledDisplay
-                            font.pixelSize: 17
-                            color: Theme.text
-                        }
-                        MouseArea {
-                            id: fontArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Config.lyricsFont = parent.modelData
+                    spacing: 6
+                    visible: root.viewPart === "text"
+                    SettingSlider {
+                        label: "Размер"; from: 0.5; to: 1.8; unit: "×"
+                        value: Config.lyricsScale; onChanged: v => Config.lyricsScale = v
+                    }
+
+                    Text {
+                        text: "Шрифт"
+                        font.family: Theme.font
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                        color: Theme.text
+                    }
+                    Field {
+                        id: fontFilter
+                        placeholder: "Найти шрифт…"
+                    }
+
+                    ListView {
+                        id: fonts
+                        width: parent.width
+                        height: 190
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        // The bundled face first, then everything installed, filtered.
+                        readonly property var all: [""].concat(Qt.fontFamilies().filter(f => !/emoji|symbol|math|mono|icons|awesome|nerd/i.test(f)))
+                        model: all.filter(f => !fontFilter.text || (f || Theme.bundledDisplay).toLowerCase().includes(fontFilter.text.toLowerCase()))
+                        delegate: Item {
+                            required property string modelData
+                            readonly property bool selected: Config.lyricsFont === modelData
+                            width: fonts.width
+                            height: 40
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 10
+                                color: parent.selected ? Qt.rgba(1, 1, 1, 0.14) : fontArea.containsMouse ? Theme.hover : "transparent"
+                            }
+                            Text {
+                                x: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - 20
+                                elide: Text.ElideRight
+                                text: (parent.modelData || Theme.bundledDisplay) + "  ·  Текст песни"
+                                font.family: parent.modelData || Theme.bundledDisplay
+                                font.pixelSize: 17
+                                color: Theme.text
+                            }
+                            MouseArea {
+                                id: fontArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Config.lyricsFont = parent.modelData
+                            }
                         }
                     }
+
                 }
 
-                SettingHeading { text: "Фон (обложка или клип)" }
-                SettingSlider {
-                    label: "Яркость фона"; from: 0; to: 1
-                    value: Config.backdropOpacity; onChanged: v => Config.backdropOpacity = v
-                }
-                SettingSlider {
-                    label: "Размытие фона"; from: 0; to: 1
-                    value: Config.backdropBlur; onChanged: v => Config.backdropBlur = v
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    visible: root.viewPart === "back"
+                    SettingSlider {
+                        label: "Яркость фона"; from: 0; to: 1
+                        value: Config.backdropOpacity; onChanged: v => Config.backdropOpacity = v
+                    }
+                    SettingSlider {
+                        label: "Размытие фона"; from: 0; to: 1
+                        value: Config.backdropBlur; onChanged: v => Config.backdropBlur = v
+                    }
+
                 }
 
-                SettingHeading { text: "Прозрачность" }
-                SettingSlider {
-                    label: "Панель слева"; from: 0; to: 1
-                    value: Config.panelOpacity; onChanged: v => Config.panelOpacity = v
-                }
-                SettingSlider {
-                    label: "Меню"; from: 0.3; to: 1
-                    value: Config.menuOpacity; onChanged: v => Config.menuOpacity = v
-                }
-                SettingSlider {
-                    label: "Стекло окна"; from: 0; to: 1
-                    value: Config.glassOpacity; onChanged: v => Config.glassOpacity = v
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    visible: root.viewPart === "glass"
+                    SettingSlider {
+                        label: "Панель слева"; from: 0; to: 1
+                        value: Config.panelOpacity; onChanged: v => Config.panelOpacity = v
+                    }
+                    SettingSlider {
+                        label: "Меню"; from: 0.3; to: 1
+                        value: Config.menuOpacity; onChanged: v => Config.menuOpacity = v
+                    }
+                    SettingSlider {
+                        label: "Стекло окна"; from: 0; to: 1
+                        value: Config.glassOpacity; onChanged: v => Config.glassOpacity = v
+                    }
                 }
             }
 
@@ -429,93 +408,123 @@ Glass {
                 spacing: 6
                 visible: root.tab === "clock"
 
-                SettingHeading { text: "Где показывать" }
-                Note {
-                    text: "У каждой сцены свои часы. Перетащи их мышью куда нужно, двойной щелчок вернёт на место. Сейчас: <b>"
-                        + ({ Lyrics: "текст", Covers: "обложки", Clip: "клип" })[root.scene] + "</b>."
+                // One part of the tab at a time.
+                Segments {
+                    width: parent.width
+                    height: 30
+                    color: "transparent"
+                    options: [["where", "Где"], ["size", "Размер"], ["colour", "Цвет"], ["outline", "Обводка"]]
+                    value: root.clockPart
+                    onPicked: v => root.clockPart = v
                 }
-                SettingSwitch {
-                    label: "В режиме текста"
-                    checked: Config.clockShowLyrics
-                    onToggled: c => Config.clockShowLyrics = c
-                }
-                SettingSwitch {
-                    label: "В режиме обложек"
-                    checked: Config.clockShowCovers
-                    onToggled: c => Config.clockShowCovers = c
-                }
-                SettingSwitch {
-                    label: "Когда на фоне клип"
-                    checked: Config.clockShowClip
-                    onToggled: c => Config.clockShowClip = c
-                }
-                Pill {
-                    icon: "refresh"
-                    label: "Вернуть часы на место"
-                    onClicked: {
-                        for (const k of ["Lyrics", "Covers", "Clip"]) { Config["clock" + k + "X"] = -1; Config["clock" + k + "Y"] = -1; }
+                Item { width: 1; height: 4 }
+
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    visible: root.clockPart === "where"
+                    Note {
+                        text: "У каждой сцены свои часы. Перетащи их мышью куда нужно, двойной щелчок вернёт на место. Сейчас: <b>"
+                            + ({ Lyrics: "текст", Covers: "обложки", Clip: "клип" })[root.scene] + "</b>."
                     }
+                    SettingSwitch {
+                        label: "В режиме текста"
+                        checked: Config.clockShowLyrics
+                        onToggled: c => Config.clockShowLyrics = c
+                    }
+                    SettingSwitch {
+                        label: "В режиме обложек"
+                        checked: Config.clockShowCovers
+                        onToggled: c => Config.clockShowCovers = c
+                    }
+                    SettingSwitch {
+                        label: "Когда на фоне клип"
+                        checked: Config.clockShowClip
+                        onToggled: c => Config.clockShowClip = c
+                    }
+                    Pill {
+                        icon: "refresh"
+                        label: "Вернуть часы на место"
+                        onClicked: {
+                            for (const k of ["Lyrics", "Covers", "Clip"]) { Config["clock" + k + "X"] = -1; Config["clock" + k + "Y"] = -1; }
+                        }
+                    }
+
                 }
 
-                SettingHeading { text: "Слой и размер" }
-                Segments {
+                Column {
                     width: parent.width
-                    options: [["back", "Под текстом"], ["front", "Поверх всего"]]
-                    value: Config.clockLayer
-                    onPicked: v => Config.clockLayer = v
-                }
-                SettingSlider {
-                    label: "Размер"; from: 0.4; to: 2.5; unit: "×"
-                    value: Config.clockScale; onChanged: v => Config.clockScale = v
+                    spacing: 6
+                    visible: root.clockPart === "size"
+                    Segments {
+                        width: parent.width
+                        options: [["back", "Под текстом"], ["front", "Поверх всего"]]
+                        value: Config.clockLayer
+                        onPicked: v => Config.clockLayer = v
+                    }
+                    SettingSlider {
+                        label: "Размер"; from: 0.4; to: 2.5; unit: "×"
+                        value: Config.clockScale; onChanged: v => Config.clockScale = v
+                    }
+
                 }
 
-                SettingHeading { text: "Цвет цифр" }
-                Segments {
+                Column {
                     width: parent.width
-                    options: [["auto", "По обложке"], ["solid", "Цвет"], ["gradient", "Градиент"]]
-                    value: Config.clockFill
-                    onPicked: v => Config.clockFill = v
-                }
-                Label { visible: Config.clockFill === "gradient"; text: "Сверху / с начала" }
-                Swatches {
-                    visible: Config.clockFill !== "auto"
-                    value: Config.clockColor
-                    onPicked: v => Config.clockColor = v
-                }
-                Label { visible: Config.clockFill === "gradient"; text: "Снизу / к концу" }
-                Swatches {
-                    visible: Config.clockFill === "gradient"
-                    value: Config.clockColor2
-                    onPicked: v => Config.clockColor2 = v
-                }
-                Segments {
-                    width: parent.width
-                    visible: Config.clockFill === "gradient" || Config.clockOutlineGradient
-                    options: [["90", "Сверху вниз"], ["0", "Слева направо"], ["45", "Наискосок"]]
-                    value: String(Math.round(Config.clockAngle))
-                    onPicked: v => Config.clockAngle = parseInt(v)
+                    spacing: 6
+                    visible: root.clockPart === "colour"
+                    Segments {
+                        width: parent.width
+                        options: [["auto", "По обложке"], ["solid", "Цвет"], ["gradient", "Градиент"]]
+                        value: Config.clockFill
+                        onPicked: v => Config.clockFill = v
+                    }
+                    Label { visible: Config.clockFill === "gradient"; text: "Сверху / с начала" }
+                    Swatches {
+                        visible: Config.clockFill !== "auto"
+                        value: Config.clockColor
+                        onPicked: v => Config.clockColor = v
+                    }
+                    Label { visible: Config.clockFill === "gradient"; text: "Снизу / к концу" }
+                    Swatches {
+                        visible: Config.clockFill === "gradient"
+                        value: Config.clockColor2
+                        onPicked: v => Config.clockColor2 = v
+                    }
+                    Segments {
+                        width: parent.width
+                        visible: Config.clockFill === "gradient" || Config.clockOutlineGradient
+                        options: [["90", "Сверху вниз"], ["0", "Слева направо"], ["45", "Наискосок"]]
+                        value: String(Math.round(Config.clockAngle))
+                        onPicked: v => Config.clockAngle = parseInt(v)
+                    }
+
                 }
 
-                SettingHeading { text: "Обводка" }
-                SettingSlider {
-                    label: "Толщина"; from: 0; to: 12; unit: " px"; decimals: 1
-                    value: Config.clockOutline; onChanged: v => Config.clockOutline = Math.round(v * 2) / 2
-                }
-                Swatches {
-                    visible: Config.clockOutline > 0
-                    value: Config.clockOutlineColor
-                    onPicked: v => Config.clockOutlineColor = v
-                }
-                SettingSwitch {
-                    visible: Config.clockOutline > 0
-                    label: "Обводка градиентом"
-                    checked: Config.clockOutlineGradient
-                    onToggled: c => Config.clockOutlineGradient = c
-                }
-                Swatches {
-                    visible: Config.clockOutline > 0 && Config.clockOutlineGradient
-                    value: Config.clockOutlineColor2
-                    onPicked: v => Config.clockOutlineColor2 = v
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    visible: root.clockPart === "outline"
+                    SettingSlider {
+                        label: "Толщина"; from: 0; to: 12; unit: " px"; decimals: 1
+                        value: Config.clockOutline; onChanged: v => Config.clockOutline = Math.round(v * 2) / 2
+                    }
+                    Swatches {
+                        visible: Config.clockOutline > 0
+                        value: Config.clockOutlineColor
+                        onPicked: v => Config.clockOutlineColor = v
+                    }
+                    SettingSwitch {
+                        visible: Config.clockOutline > 0
+                        label: "Обводка градиентом"
+                        checked: Config.clockOutlineGradient
+                        onToggled: c => Config.clockOutlineGradient = c
+                    }
+                    Swatches {
+                        visible: Config.clockOutline > 0 && Config.clockOutlineGradient
+                        value: Config.clockOutlineColor2
+                        onPicked: v => Config.clockOutlineColor2 = v
+                    }
                 }
             }
 

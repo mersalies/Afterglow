@@ -30,6 +30,7 @@ SCOPES = " ".join([
     "playlist-read-private",
     "playlist-read-collaborative",
     "user-library-read",
+    "user-library-modify",
 ])
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "afterglow")
 STORE = os.path.join(CONFIG_DIR, "spotify.json")
