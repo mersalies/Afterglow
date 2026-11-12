@@ -1,16 +1,21 @@
 import QtQuick
 
-// Put inside a block to let it be dragged around while "move blocks" is on in
-// the settings (Config.editLayout). The block itself applies the offset:
-//   transform: Translate { x: Config.posDeckX * span.width; y: Config.posDeckY * span.height }
-// Offsets are kept as shares of the window, so they survive resizing.
-// Double-click puts the block back.
+// Put inside a block to let it be arranged while "move blocks" is on
+// (Config.editLayout): drag it anywhere, and set its lean and size with the two
+// lines under it. The block itself applies what is stored in Config.layout:
+//   readonly property var lay: Config.lay("deck")
+//   transform: [ Scale {...lay.scale}, Rotation {...lay.tilt}, Translate {...lay.x * span.width} ]
+// Offsets are shares of the window, so they survive resizing. Double-click puts
+// the block back as it was.
 Item {
     id: root
 
-    property string key            // Config key without the X / Y ending
+    property string key            // name in Config.layout
     property string label
     property Item span             // what the offsets are a share of (it must not move)
+    property bool plain: false     // position only: no lean, no size
+
+    readonly property var lay: Config.lay(key)
 
     anchors.fill: parent
     z: 1000
@@ -55,16 +60,112 @@ Item {
         property real fy
         onPressed: e => {
             from = mapToItem(root.span, e.x, e.y);
-            fx = Config[root.key + "X"];
-            fy = Config[root.key + "Y"];
+            fx = root.lay.x;
+            fy = root.lay.y;
         }
         onPositionChanged: e => {
             if (!pressed) return;
             const p = mapToItem(root.span, e.x, e.y);
-            Config[root.key + "X"] = Math.max(-1, Math.min(1, fx + (p.x - from.x) / Math.max(1, root.span.width)));
-            Config[root.key + "Y"] = Math.max(-1, Math.min(1, fy + (p.y - from.y) / Math.max(1, root.span.height)));
+            Config.setLay(root.key, {
+                x: Math.max(-1, Math.min(1, fx + (p.x - from.x) / Math.max(1, root.span.width))),
+                y: Math.max(-1, Math.min(1, fy + (p.y - from.y) / Math.max(1, root.span.height)))
+            });
         }
-        onDoubleClicked: { Config[root.key + "X"] = 0; Config[root.key + "Y"] = 0; }
+        onDoubleClicked: Config.setLay(root.key, null)
         onWheel: e => e.accepted = true
+    }
+
+    // Lean and size.
+    // They sit on the span, not on the block, so the block's lean and size do not
+    // bend them: always the same size, under the block and never off the window.
+    property rect box
+    FrameAnimation {
+        running: root.visible && !root.plain
+        onTriggered: {
+            const c = [[0, 0], [root.width, 0], [0, root.height], [root.width, root.height]]
+                .map(q => root.mapToItem(root.span, q[0], q[1]));
+            const xs = c.map(q => q.x), ys = c.map(q => q.y);
+            const l = Math.min(...xs), u = Math.min(...ys);
+            root.box = Qt.rect(l, u, Math.max(...xs) - l, Math.max(...ys) - u);
+        }
+    }
+    Rectangle {
+        parent: root.span
+        z: 2000
+        visible: root.visible && !root.plain
+        x: Math.max(8, Math.min(parent.width - width - 8, root.box.x + root.box.width / 2 - width / 2))
+        y: Math.max(8, Math.min(parent.height - height - 8, root.box.y + root.box.height + 18))
+        width: 280
+        height: 78
+        radius: 14
+        color: Theme.menuColor(0.95)
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.14)
+        MouseArea { anchors.fill: parent; onWheel: e => e.accepted = true }
+
+        component Line: Row {
+            id: line
+            property string name
+            property string shown
+            property real value
+            signal moved(real v)
+            x: 12
+            width: parent.width - 24
+            spacing: 8
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 56
+                text: line.name
+                font.family: Theme.font
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                color: Theme.text
+            }
+            ThinSlider {
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width - 56 - 40 - 16
+                live: true
+                value: line.value
+                onMoved: v => line.moved(v)
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 40
+                horizontalAlignment: Text.AlignRight
+                text: line.shown
+                font.family: Theme.font
+                font.pixelSize: 11
+                font.features: { "tnum": 1 }
+                color: Theme.textSecondary
+            }
+        }
+        Column {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            spacing: 4
+            // Which block the lines belong to: the panel may sit away from it.
+            Text {
+                x: 12
+                text: root.label
+                font.family: Theme.font
+                font.pixelSize: 11
+                font.weight: Font.Bold
+                color: Qt.lighter(Player.accent, 1.3)
+            }
+            // -50°..50°, snapping to straight near the middle.
+            Line {
+                name: "Наклон"
+                shown: Math.round(root.lay.tilt) + "°"
+                value: (root.lay.tilt + 50) / 100
+                onMoved: v => { const t = v * 100 - 50; Config.setLay(root.key, { tilt: Math.abs(t) < 2 ? 0 : t }); }
+            }
+            // 0.5×..2×
+            Line {
+                name: "Размер"
+                shown: root.lay.scale.toFixed(2) + "×"
+                value: (root.lay.scale - 0.5) / 1.5
+                onMoved: v => { const s = 0.5 + v * 1.5; Config.setLay(root.key, { scale: Math.abs(s - 1) < 0.03 ? 1 : s }); }
+            }
+        }
     }
 }

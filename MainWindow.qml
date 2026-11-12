@@ -243,6 +243,9 @@ FloatingWindow {
             readonly property bool lyricsView: !stage && Config.view !== "covers"
             // Library and clock float without a sheet, the library leaning in.
             readonly property bool floatSide: lyricsView || stage
+            // Where the scene view's centre and bottom bars were put while arranging.
+            readonly property var centreLay: Config.lay("centre2")
+            readonly property var barLay: lyricsView ? Config.lay("bar2") : ({ x: 0, y: 0 })
             readonly property int m: 20
             readonly property bool narrow: width < 900
             readonly property real libW: 320
@@ -446,6 +449,11 @@ FloatingWindow {
                 }
                 opacity: full.lyricsView && !full.showCards ? 1 : 0
                 scale: full.lyricsView && !full.showCards ? 1 : 1.06
+                transform: [
+                    Scale { origin.x: stageView.width / 2; origin.y: stageView.height / 2; xScale: full.centreLay.scale; yScale: full.centreLay.scale },
+                    Rotation { origin.x: stageView.width / 2; origin.y: stageView.height / 2; axis.x: 0; axis.y: 1; axis.z: 0; angle: full.centreLay.tilt; distanceToPlane: 1400 },
+                    Translate { x: full.centreLay.x * full.width; y: full.centreLay.y * full.height }
+                ]
                 visible: opacity > 0.01
                 Behavior on opacity { Ease {} }
                 Behavior on scale { Ease {} }
@@ -465,9 +473,39 @@ FloatingWindow {
                 y: stageView.y + (stageView.height - height) / 2
                 opacity: full.showCards ? 1 : 0
                 scale: full.showCards ? 1 : 0.92
+                transform: [
+                    Scale { origin.x: cards.width / 2; origin.y: cards.height / 2; xScale: full.centreLay.scale; yScale: full.centreLay.scale },
+                    Rotation { origin.x: cards.width / 2; origin.y: cards.height / 2; axis.x: 0; axis.y: 1; axis.z: 0; angle: full.centreLay.tilt; distanceToPlane: 1400 },
+                    Translate { x: full.centreLay.x * full.width; y: full.centreLay.y * full.height }
+                ]
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
                 Behavior on scale { NumberAnimation { duration: 420; easing.type: Easing.OutCubic } }
+            }
+
+            // Handles for arranging the scene view's centre and its bottom bars.
+            Item {
+                z: 60
+                visible: Config.editLayout && full.lyricsView
+                x: stageView.x
+                y: stageView.y
+                width: stageView.width
+                height: stageView.height
+                transform: [
+                    Scale { origin.x: stageView.width / 2; origin.y: stageView.height / 2; xScale: full.centreLay.scale; yScale: full.centreLay.scale },
+                    Rotation { origin.x: stageView.width / 2; origin.y: stageView.height / 2; axis.x: 0; axis.y: 1; axis.z: 0; angle: full.centreLay.tilt; distanceToPlane: 1400 },
+                    Translate { x: full.centreLay.x * full.width; y: full.centreLay.y * full.height }
+                ]
+                Movable { key: "centre2"; label: "Текст и карточки"; span: full }
+            }
+            Item {
+                z: 60
+                visible: Config.editLayout && full.lyricsView
+                x: bar.x
+                y: search.y
+                width: bar.width
+                height: bar.y + bar.height - search.y
+                Movable { key: "bar2"; label: "Поиск и панель"; span: full; plain: true }
             }
 
             // ---- stage view
@@ -531,39 +569,40 @@ FloatingWindow {
                 Behavior on y { Ease {} }
                 Behavior on opacity { NumberAnimation { duration: 300 } }
                 transform: [
+                    Scale { origin.x: library.width / 2; origin.y: library.height / 2; xScale: library.lay.scale; yScale: library.lay.scale },
                     Rotation {
                         origin.x: 0
                         origin.y: library.height / 2
                         axis { x: 0; y: 1; z: 0 }
-                        angle: full.libDocked ? full.tilt : 0
+                        angle: (full.libDocked ? full.tilt : 0) + library.lay.tilt
                         distanceToPlane: 1200
                     },
-                    Translate {
-                        x: full.stage ? Config.posListX * full.width : 0
-                        y: full.stage ? Config.posListY * full.height : 0
-                    }
+                    Translate { x: library.lay.x * full.width; y: library.lay.y * full.height }
                 ]
-                Movable { visible: Config.editLayout && full.stage; key: "posList"; label: "Список"; span: full }
+                // Arranged separately in each of the two floating views.
+                readonly property string layKey: full.stage ? "list" : "list2"
+                readonly property var lay: full.floatSide && full.libDocked ? Config.lay(layKey) : ({ x: 0, y: 0, tilt: 0, scale: 1 })
+                Movable { visible: Config.editLayout && full.floatSide && full.libDocked; key: library.layKey; label: "Список"; span: full }
             }
             // Leaving the stage ends the moving.
             Connections {
                 target: full
-                function onStageChanged() { if (!full.stage) Config.editLayout = false; }
+                function onFloatSideChanged() { if (!full.floatSide) Config.editLayout = false; }
             }
 
-            // Top left corner of the stage: move the blocks, and stop moving them.
+            // Top left corner of the two floating views: arrange the blocks, and stop.
             IconButton {
                 z: 81
                 x: full.m
                 y: full.m
-                visible: full.stage
+                visible: full.floatSide
                 opacity: Config.editLayout || windowHover.hovered ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: 300 } }
                 icon: "move"
                 size: 38
                 iconSize: 18
                 toggled: Config.editLayout
-                tooltip: Config.editLayout ? "Закончить: блоки останутся на местах" : "Двигать блоки"
+                tooltip: Config.editLayout ? "Закончить: блоки останутся на местах" : "Двигать блоки: место, наклон, размер"
                 onClicked: Config.editLayout = !Config.editLayout
                 Rectangle {
                     z: -1
@@ -578,7 +617,7 @@ FloatingWindow {
             // "Move blocks" is on: say so, and offer the way out.
             Glass {
                 z: 80
-                visible: Config.editLayout && full.stage
+                visible: Config.editLayout
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: full.m
                 width: editRow.implicitWidth + 28
@@ -591,7 +630,7 @@ FloatingWindow {
                     spacing: 10
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "Перетащи блоки куда нужно. Двойной клик по блоку — на место."
+                        text: "Перетащи блоки, под каждым — наклон и размер. Двойной клик по блоку — как было."
                         font.family: Theme.font
                         font.pixelSize: 13
                         color: Theme.text
@@ -665,8 +704,8 @@ FloatingWindow {
                 Behavior on opacity { NumberAnimation { duration: 300 } }
                 readonly property real stageY: stageDeck.item?.rowY ?? full.height - 70
                 width: full.stage ? (stageDeck.item?.rowW ?? 560) : full.lyricsView ? Math.max(560, Math.min(800, full.width * 0.42)) : full.width - full.m * 2
-                x: full.floatSide ? (full.width - width) / 2 : full.m
-                y: full.stage ? stageY : full.height - height - (full.lyricsView ? Math.max(full.m, full.height * 0.11) : full.m)
+                x: (full.floatSide ? (full.width - width) / 2 : full.m) + full.barLay.x * full.width
+                y: (full.stage ? stageY : full.height - height - (full.lyricsView ? Math.max(full.m, full.height * 0.11) : full.m)) + full.barLay.y * full.height
                 Behavior on y { Ease {} }
                 onSourceClicked: menu.open = !menu.open
                 onStyleClicked: styleMenu.open = !styleMenu.open

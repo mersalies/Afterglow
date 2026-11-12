@@ -50,25 +50,29 @@ Singleton {
     property alias stageStyle: adapter.stageStyle
     property alias stageFocus: adapter.stageFocus
     property alias libraryTab: adapter.libraryTab
-    property alias posDeckX: adapter.posDeckX
-    property alias posDeckY: adapter.posDeckY
-    property alias posSeekX: adapter.posSeekX
-    property alias posSeekY: adapter.posSeekY
-    property alias posControlsX: adapter.posControlsX
-    property alias posControlsY: adapter.posControlsY
-    property alias posListX: adapter.posListX
-    property alias posListY: adapter.posListY
 
     // "Move blocks" in the settings: the stage's blocks can be dragged. Not saved.
     property bool editLayout: false
     readonly property var stageStyles: [["arc", "Дуга"], ["dial", "Диск"]]
     function cycleStageStyle() {
         stageStyle = stageStyles[(Math.max(0, stageStyles.findIndex(x => x[0] === stageStyle)) + 1) % stageStyles.length][0];
-        Spotify.say("Сцена: " + stageStyles.find(x => x[0] === stageStyle)[1]);
+        Spotify.say("Витрина: " + stageStyles.find(x => x[0] === stageStyle)[1]);
     }
-    function resetLayout() {
-        for (const k of ["Deck", "Seek", "Controls", "List"]) { root["pos" + k + "X"] = 0; root["pos" + k + "Y"] = 0; }
+    // Where the blocks were put while arranging: { name: { x, y, tilt, scale } },
+    // x and y as shares of the window, tilt in degrees, scale a multiplier.
+    property alias layout: adapter.layout
+    function lay(key) {
+        const l = layout[key] ?? {};
+        return { x: l.x ?? 0, y: l.y ?? 0, tilt: l.tilt ?? 0, scale: l.scale ?? 1 };
     }
+    // Change some of a block's values; null puts the block back as it was.
+    function setLay(key, patch) {
+        const next = Object.assign({}, layout);
+        if (patch === null) delete next[key];
+        else next[key] = Object.assign(lay(key), patch);
+        layout = next;
+    }
+    function resetLayout() { layout = ({}); }
     property alias clockScale: adapter.clockScale
     property alias clockLayer: adapter.clockLayer
     property alias clockFill: adapter.clockFill
@@ -90,7 +94,7 @@ Singleton {
     property alias clockClipY: adapter.clockClipY
 
     // The three looks of the window, in the order the mode button steps through.
-    readonly property var views: [["lyrics", "Текст"], ["stage", "Сцена"], ["covers", "Обложки"]]
+    readonly property var views: [["lyrics", "Сцена"], ["stage", "Витрина"], ["covers", "Обложки"]]
     function viewName(v) { return (views.find(x => x[0] === v) ?? views[0])[1]; }
     function cycleView() {
         view = views[(Math.max(0, views.findIndex(x => x[0] === view)) + 1) % views.length][0];
@@ -193,20 +197,12 @@ Singleton {
             property real volume: 0.8
             // The stage view: how the covers stand ("arc" on a shelf, "dial" a disc
             // with a ring), whether it shows one cover with the
-            // lyric line beside it, and where its blocks were dragged (shares of
-            // the window, 0 = their own place).
+            // lyric line beside it. `layout`: where blocks were put while arranging.
             property string stageStyle: "arc"
             property bool stageFocus: false
+            property var layout: ({})
             // The tab the left panel was left on: "next", "history" or "library".
             property string libraryTab: "history"
-            property real posDeckX: 0
-            property real posDeckY: 0
-            property real posSeekX: 0
-            property real posSeekY: 0
-            property real posControlsX: 0
-            property real posControlsY: 0
-            property real posListX: 0
-            property real posListY: 0
             // Clock: size multiplier; "back" (under the lyrics and cards) or "front"
             // (over everything but the menus); fill "auto" (from the cover), "solid"
             // or "gradient" (clockColor to clockColor2 at clockAngle degrees, 90 =

@@ -25,19 +25,12 @@ Item {
             .slice(0, 40).map((t, i) => ({ t, kind: "past", i }));
     }
     readonly property int shown: 7
+    // Which track stands first; the fan glides to it (pos follows shift).
     property int shift: 0
     onAllChanged: shift = Math.max(0, Math.min(shift, all.length - shown))
-    readonly property var around: all.slice(shift, shift + shown)
-    // The fan swings a step as it turns, then settles.
-    property real swing: 0
-    Behavior on swing { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-    function turn(by) {
-        const to = Math.max(0, Math.min(all.length - shown, shift + by));
-        if (to === shift) return;
-        swing = by > 0 ? 18 : -18;
-        shift = to;
-        Qt.callLater(() => swing = 0);
-    }
+    property real pos: shift
+    Behavior on pos { SpringAnimation { spring: 3.2; damping: 0.36; epsilon: 0.002 } }
+    function turn(by) { shift = Math.max(0, Math.min(Math.max(0, all.length - shown), shift + by)); }
     WheelHandler {
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         onWheel: e => { if (Math.abs(e.angleDelta.y) >= 60) dial.turn(e.angleDelta.y > 0 ? -1 : 1); }
@@ -53,34 +46,17 @@ Item {
     }
     property real bass: Player.isPlaying ? Audio.bass : 0
     Behavior on bass { NumberAnimation { duration: 110 } }
-
-    // Ring: click or drag around it to seek (12 o'clock is the start).
-    MouseArea {
-        id: ring
-        x: dial.cx - dial.ringR - 12
-        y: dial.cy - dial.ringR - 12
-        width: (dial.ringR + 12) * 2
-        height: width
-        enabled: Player.canSeek
-        property real at: 0
-        function set(mx, my) {
-            const a = Math.atan2(mx - width / 2, -(my - height / 2));
-            at = (a < 0 ? a + 2 * Math.PI : a) / (2 * Math.PI);
-        }
-        onPressed: e => {
-            if (Math.hypot(e.x - width / 2, e.y - height / 2) < dial.d / 2) { e.accepted = false; return; }
-            set(e.x, e.y);
-        }
-        onPositionChanged: e => { if (pressed) set(e.x, e.y); }
-        onReleased: Player.seekTo(at)
-    }
+    // It also trembles in time: a fast shake whose size is the kick and the bass.
+    property real phase: 0
+    NumberAnimation on phase { from: 0; to: 2 * Math.PI; duration: 95; loops: Animation.Infinite; running: dial.visible && Player.isPlaying }
+    readonly property real tremble: dial.kick * 3.2 + dial.bass * 1.4
 
     Shape {
         anchors.fill: parent
         preferredRendererType: Shape.CurveRenderer
         ShapePath {
-            strokeColor: Qt.rgba(1, 1, 1, 0.22)
-            strokeWidth: 1.5
+            strokeColor: Qt.rgba(1, 1, 1, ring.containsMouse ? 0.4 : 0.22)
+            strokeWidth: ring.containsMouse ? 3 : 1.5
             fillColor: "transparent"
             PathAngleArc { centerX: dial.cx; centerY: dial.cy; radiusX: dial.ringR; radiusY: dial.ringR; startAngle: 0; sweepAngle: 360 }
         }
@@ -97,7 +73,7 @@ Item {
         }
         ShapePath {
             strokeColor: dial.glow
-            strokeWidth: 3 + dial.bass * 4
+            strokeWidth: (ring.containsMouse || ring.pressed ? 6 : 3) + dial.bass * 4
             fillColor: "transparent"
             capStyle: ShapePath.RoundCap
             PathAngleArc {
@@ -110,8 +86,9 @@ Item {
 
     ClippingRectangle {
         id: disc
-        x: dial.cx - dial.d / 2
-        y: dial.cy - dial.d / 2
+        x: dial.cx - dial.d / 2 + Math.sin(dial.phase) * dial.tremble
+        y: dial.cy - dial.d / 2 + Math.cos(dial.phase * 2) * dial.tremble * 0.6
+        rotation: Math.sin(dial.phase) * dial.kick * 1.4
         width: dial.d
         height: dial.d
         radius: dial.d / 2
@@ -167,28 +144,137 @@ Item {
                 color: Theme.textSecondary
             }
         }
-        TapHandler { onTapped: Player.toggle() }
-        HoverHandler { cursorShape: Qt.PointingHandCursor }
+    }
+
+    // Seek: a wide band over the ring (from just inside the disc's edge outwards).
+    // Click or drag around it; 12 o'clock is the start. Inside it, a click on
+    // the disc plays and pauses.
+    MouseArea {
+        id: ring
+        readonly property real outer: dial.ringR + 13
+        readonly property real inner: dial.d / 2 - 12
+        x: dial.cx - outer
+        y: dial.cy - outer
+        width: outer * 2
+        height: width
+        hoverEnabled: true
+        property real at: 0
+        property bool seeking: false
+        cursorShape: Qt.PointingHandCursor
+        function dist(mx, my) { return Math.hypot(mx - width / 2, my - height / 2); }
+        function set(mx, my) {
+            const a = Math.atan2(mx - width / 2, -(my - height / 2));
+            at = (a < 0 ? a + 2 * Math.PI : a) / (2 * Math.PI);
+        }
+        onPressed: e => {
+            const r = dist(e.x, e.y);
+            if (r > outer) { e.accepted = false; return; }
+            seeking = r >= inner && Player.canSeek;
+            if (seeking) set(e.x, e.y);
+        }
+        onPositionChanged: e => { if (pressed && seeking) set(e.x, e.y); }
+        onReleased: e => {
+            if (seeking) Player.seekTo(at);
+            else if (dist(e.x, e.y) < inner) Player.toggle();
+            seeking = false;
+        }
+        onCanceled: seeking = false
+    }
+
+    // Volume: an arc at the left of the ring, quiet at the bottom, loud at the top.
+    Item {
+        id: vol
+        visible: Player.volumeSupported
+        readonly property real r: dial.ringR + 26
+        readonly property real a0: 128      // degrees clockwise from 3 o'clock: lower left
+        readonly property real a1: 232      // upper left
+        readonly property real shown: volArea.pressed ? volArea.at : Player.volume
+        function point(t, rad) {
+            const a = (a0 + (a1 - a0) * t) * Math.PI / 180;
+            return Qt.point(dial.cx + rad * Math.cos(a), dial.cy + rad * Math.sin(a));
+        }
+        Shape {
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: Qt.rgba(1, 1, 1, 0.25)
+                strokeWidth: volArea.containsMouse || volArea.pressed ? 5 : 3
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathAngleArc { centerX: dial.cx; centerY: dial.cy; radiusX: vol.r; radiusY: vol.r; startAngle: vol.a0; sweepAngle: vol.a1 - vol.a0 }
+            }
+            ShapePath {
+                strokeColor: dial.glow
+                strokeWidth: volArea.containsMouse || volArea.pressed ? 5 : 3
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathAngleArc { centerX: dial.cx; centerY: dial.cy; radiusX: vol.r; radiusY: vol.r; startAngle: vol.a0; sweepAngle: (vol.a1 - vol.a0) * vol.shown }
+            }
+        }
+        Rectangle {
+            readonly property point p: vol.point(vol.shown, vol.r)
+            width: volArea.containsMouse || volArea.pressed ? 13 : 9
+            height: width
+            radius: width / 2
+            x: p.x - width / 2
+            y: p.y - height / 2
+            color: "white"
+        }
+        Icon {
+            readonly property point p: vol.point(-0.09, vol.r)
+            x: p.x - size / 2; y: p.y - size / 2
+            kind: "volume"; size: 13; color: Theme.textTertiary
+        }
+        Icon {
+            readonly property point p: vol.point(1.09, vol.r)
+            x: p.x - size / 2; y: p.y - size / 2
+            kind: "volume"; size: 17; color: Theme.textSecondary
+        }
+        MouseArea {
+            id: volArea
+            x: dial.cx - vol.r - 16
+            y: dial.cy - vol.r - 16
+            width: vol.r + 16
+            height: (vol.r + 16) * 2
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            property real at: 0
+            function inBand(mx, my) {
+                const r = Math.hypot(mx - width, my - height / 2);
+                return r > ring.outer + 2 && r < vol.r + 16;
+            }
+            function set(mx, my) {
+                let a = Math.atan2(my - height / 2, mx - width) * 180 / Math.PI;
+                if (a < 0) a += 360;
+                at = Math.max(0, Math.min(1, (a - vol.a0) / (vol.a1 - vol.a0)));
+                Player.setVolume(at);
+            }
+            onPressed: e => { if (!inBand(e.x, e.y)) { e.accepted = false; return; } set(e.x, e.y); }
+            onPositionChanged: e => { if (pressed) set(e.x, e.y); }
+            onWheel: e => Player.setVolume(Player.volume + (e.angleDelta.y > 0 ? 0.05 : -0.05))
+        }
     }
 
     // What is around: thumbnails along the ring, names pointing outwards.
     Repeater {
-        model: dial.around
+        model: dial.all
         Item {
             id: spoke
             required property var modelData
             required property int index
-            readonly property int n: dial.around.length
-            // -64°..64° around 3 o'clock, top first.
-            readonly property real deg: (n <= 1 ? 0 : -64 + 128 * index / (n - 1)) + dial.swing
+            // Seven places, -64°..64° around 3 o'clock, top first; the rest wait
+            // past the ends and fade in as the fan turns.
+            readonly property real place: index - dial.pos
+            readonly property real deg: -64 + 128 * place / (dial.shown - 1)
+            readonly property real edge: Math.max(0, -place, place - (dial.shown - 1))
+            visible: edge < 1.2
             readonly property real rad: deg * Math.PI / 180
             readonly property real r: dial.ringR + 14 + size / 2
             readonly property real size: Math.max(26, dial.d * 0.13)
             x: dial.cx + r * Math.cos(rad)
             y: dial.cy + r * Math.sin(rad)
             rotation: deg
-            opacity: hover.hovered ? 1 : 0.82
-            scale: (hover.hovered ? 1.12 : 1) + dial.kick * 0.05
+            opacity: (hover.hovered ? 1 : 0.82) * Math.max(0, 1 - edge)
+            scale: ((hover.hovered ? 1.12 : 1) + dial.kick * 0.05) * (1 - Math.min(1, edge) * 0.4)
 
             ClippingRectangle {
                 id: thumb

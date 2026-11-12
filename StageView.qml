@@ -18,10 +18,10 @@ Item {
     signal lyricsModeClicked
 
     // Where the search sheet grows from, and where the menus open (our coordinates).
-    readonly property rect searchSpot: Qt.rect(seekBox.x + Config.posSeekX * width + tools.x + searchBtn.x,
-                                               seekBox.y + Config.posSeekY * height + tools.y, searchBtn.width, searchBtn.height)
-    readonly property real rowX: ctrlBox.x + Config.posControlsX * width
-    readonly property real rowY: ctrlBox.y + Config.posControlsY * height + row.y
+    readonly property rect searchSpot: Qt.rect(seekBox.x + seekBox.lay.x * width + tools.x + searchBtn.x,
+                                               seekBox.y + seekBox.lay.y * height + tools.y, searchBtn.width, searchBtn.height)
+    readonly property real rowX: ctrlBox.x + ctrlBox.lay.x * width
+    readonly property real rowY: ctrlBox.y + ctrlBox.lay.y * height + row.y
     readonly property real rowW: row.width
     readonly property real cardSize: flow.item?.cardSize ?? flow.item?.d ?? 280
 
@@ -45,7 +45,12 @@ Item {
         x: (root.width - width) / 2
         y: root.height * 0.30
         height: Math.max(120, seekBox.y - y - 8)
-        transform: Translate { x: Config.posDeckX * root.width; y: Config.posDeckY * root.height }
+        readonly property var lay: Config.lay("deck")
+        transform: [
+            Scale { origin.x: deckBox.width / 2; origin.y: deckBox.height / 2; xScale: deckBox.lay.scale; yScale: deckBox.lay.scale },
+            Rotation { origin.x: deckBox.width / 2; origin.y: deckBox.height / 2; axis.x: 0; axis.y: 1; axis.z: 0; angle: deckBox.lay.tilt; distanceToPlane: 1400 },
+            Translate { x: deckBox.lay.x * root.width; y: deckBox.lay.y * root.height }
+        ]
 
         Loader {
             id: flow
@@ -128,7 +133,7 @@ Item {
             }
         }
 
-        Movable { key: "posDeck"; label: "Обложки"; span: root }
+        Movable { key: "deck"; label: "Обложки"; span: root }
     }
 
     // ---- Block 2: the progress line (the disc has its own ring), and under it
@@ -139,7 +144,12 @@ Item {
         x: (root.width - width) / 2
         y: root.height * 0.685
         height: curve.height + 6 + tools.height
-        transform: Translate { x: Config.posSeekX * root.width; y: Config.posSeekY * root.height }
+        readonly property var lay: Config.lay("seek")
+        transform: [
+            Scale { origin.x: seekBox.width / 2; origin.y: seekBox.height / 2; xScale: seekBox.lay.scale; yScale: seekBox.lay.scale },
+            Rotation { origin.x: seekBox.width / 2; origin.y: seekBox.height / 2; axis.x: 0; axis.y: 1; axis.z: 0; angle: seekBox.lay.tilt; distanceToPlane: 1400 },
+            Translate { x: seekBox.lay.x * root.width; y: seekBox.lay.y * root.height }
+        ]
 
         Item {
             id: curve
@@ -265,11 +275,11 @@ Item {
             Round { id: searchBtn; icon: "search"; tooltip: "Поиск (Q)"; onClicked: root.searchClicked() }
             Round { icon: "covers"; tooltip: root.style === "dial" ? "Обложки дугой" : "Обложка диском"; onClicked: Config.cycleStageStyle() }
             Round { icon: "music"; toggled: Config.stageFocus; tooltip: "Одна обложка и строка текста"; onClicked: Config.stageFocus = !Config.stageFocus }
-            Round { icon: "lyrics"; tooltip: "Режим «Текст»: слова песни по центру (V)"; onClicked: root.lyricsModeClicked() }
+            Round { icon: "lyrics"; tooltip: "Режим «Сцена»: слова песни по центру (V)"; onClicked: root.lyricsModeClicked() }
             Round { icon: "gear"; tooltip: "Настройки"; onClicked: root.settingsClicked() }
         }
 
-        Movable { key: "posSeek"; label: "Перемотка и кнопки"; span: root }
+        Movable { key: "seek"; label: "Перемотка и кнопки"; span: root }
     }
 
     component Round: IconButton {
@@ -279,9 +289,9 @@ Item {
             z: -1
             anchors.fill: parent
             radius: width / 2
-            color: Qt.rgba(0, 0, 0, 0.32)
+            color: Qt.rgba(0, 0, 0, 0.5)
             border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.14)
+            border.color: Qt.rgba(1, 1, 1, 0.22)
         }
     }
 
@@ -292,7 +302,12 @@ Item {
         x: (root.width - width) / 2
         y: seekBox.y + seekBox.height + Math.max(8, root.height * 0.018)
         height: row.y + row.height
-        transform: Translate { x: Config.posControlsX * root.width; y: Config.posControlsY * root.height }
+        readonly property var lay: Config.lay("controls")
+        transform: [
+            Scale { origin.x: ctrlBox.width / 2; origin.y: ctrlBox.height / 2; xScale: ctrlBox.lay.scale; yScale: ctrlBox.lay.scale },
+            Rotation { origin.x: ctrlBox.width / 2; origin.y: ctrlBox.height / 2; axis.x: 0; axis.y: 1; axis.z: 0; angle: ctrlBox.lay.tilt; distanceToPlane: 1400 },
+            Translate { x: ctrlBox.lay.x * root.width; y: ctrlBox.lay.y * root.height }
+        ]
 
         // ---- The track
         Column {
@@ -374,23 +389,25 @@ Item {
             Row {
                 anchors.centerIn: parent
                 spacing: 14
-                IconButton {
+                Round {
                     anchors.verticalCenter: parent.verticalCenter
-                    icon: "prev"; size: 38; iconSize: 22
+                    icon: "prev"; size: 40; iconSize: 21
                     tooltip: "Предыдущий трек"
                     enabled: Player.canPrevious
                     onClicked: Player.previous()
                 }
-                // Play: a disc in the cover's colour.
+                // Play: a white disc with the cover's colour around it, so it reads on any backdrop.
                 Item {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 46
-                    height: 46
+                    width: 50
+                    height: 50
                     opacity: Player.canToggle || !Player.hasPlayer ? 1 : 0.4
                     Rectangle {
                         anchors.fill: parent
                         radius: width / 2
-                        color: root.glow
+                        color: "white"
+                        border.width: 3
+                        border.color: root.glow
                         scale: playMouse.pressed ? 0.92 : playMouse.containsMouse ? 1.08 : 1
                         Behavior on scale { NumberAnimation { duration: Theme.quick } }
                         Behavior on color { ColorAnimation { duration: Theme.slow } }
@@ -399,7 +416,7 @@ Item {
                         anchors.centerIn: parent
                         kind: Player.isPlaying ? "pause" : "play"
                         size: 22
-                        color: "white"
+                        color: "#141414"
                     }
                     MouseArea {
                         id: playMouse
@@ -409,9 +426,9 @@ Item {
                         onClicked: Player.toggle()
                     }
                 }
-                IconButton {
+                Round {
                     anchors.verticalCenter: parent.verticalCenter
-                    icon: "next"; size: 38; iconSize: 22
+                    icon: "next"; size: 40; iconSize: 21
                     tooltip: "Следующий трек"
                     enabled: Player.canNext
                     onClicked: Player.next()
@@ -446,6 +463,6 @@ Item {
             }
         }
 
-        Movable { key: "posControls"; label: "Трек и управление"; span: root }
+        Movable { key: "controls"; label: "Трек и управление"; span: root }
     }
 }
