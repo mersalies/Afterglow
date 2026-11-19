@@ -226,6 +226,8 @@ Singleton {
             console.warn("Afterglow: skipping", root.current?.uri, why);
             if (/not a bot|Sign in to confirm/i.test(why) && !Config.youtubeCookies)
                 Spotify.say("YouTube требует вход: включи youtubeCookies в настройках");
+            else if (/DRM protected/i.test(why))
+                Spotify.say("«" + (root.current?.title ?? "") + "» защищён DRM, дальше");
             else
                 Spotify.say("Не получилось включить «" + (root.current?.title ?? "") + "», дальше");
             skipFailed.restart();

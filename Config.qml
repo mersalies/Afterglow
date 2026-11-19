@@ -53,6 +53,9 @@ Singleton {
 
     // "Move blocks" in the settings: the stage's blocks can be dragged. Not saved.
     property bool editLayout: false
+    // The block picked while arranging: its lean and size lines are shown.
+    property string editKey: ""
+    onEditLayoutChanged: editKey = ""
     readonly property var stageStyles: [["arc", "Дуга"], ["dial", "Диск"]]
     function cycleStageStyle() {
         stageStyle = stageStyles[(Math.max(0, stageStyles.findIndex(x => x[0] === stageStyle)) + 1) % stageStyles.length][0];

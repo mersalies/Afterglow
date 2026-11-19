@@ -1,8 +1,8 @@
 import QtQuick
 
 // Put inside a block to let it be arranged while "move blocks" is on
-// (Config.editLayout): drag it anywhere, and set its lean and size with the two
-// lines under it. The block itself applies what is stored in Config.layout:
+// (Config.editLayout): drag it anywhere; pressing it also picks it, and the picked
+// block's lean and size are set with two lines in the corner of the window. The block itself applies what is stored in Config.layout:
 //   readonly property var lay: Config.lay("deck")
 //   transform: [ Scale {...lay.scale}, Rotation {...lay.tilt}, Translate {...lay.x * span.width} ]
 // Offsets are shares of the window, so they survive resizing. Double-click puts
@@ -16,6 +16,7 @@ Item {
     property bool plain: false     // position only: no lean, no size
 
     readonly property var lay: Config.lay(key)
+    readonly property bool chosen: Config.editKey === key
 
     anchors.fill: parent
     z: 1000
@@ -25,8 +26,8 @@ Item {
         anchors.fill: parent
         anchors.margins: -6
         radius: 14
-        color: Qt.rgba(Player.accent.r, Player.accent.g, Player.accent.b, grab.pressed ? 0.22 : grab.containsMouse ? 0.14 : 0.07)
-        border.width: 1.5
+        color: Qt.rgba(Player.accent.r, Player.accent.g, Player.accent.b, grab.pressed ? 0.22 : grab.containsMouse || root.chosen ? 0.14 : 0.07)
+        border.width: root.chosen ? 3 : 1.5
         border.color: Qt.lighter(Player.accent, 1.3)
 
         Rectangle {
@@ -59,6 +60,7 @@ Item {
         property real fx
         property real fy
         onPressed: e => {
+            Config.editKey = root.key;
             from = mapToItem(root.span, e.x, e.y);
             fx = root.lay.x;
             fy = root.lay.y;
@@ -76,25 +78,15 @@ Item {
     }
 
     // Lean and size.
-    // They sit on the span, not on the block, so the block's lean and size do not
-    // bend them: always the same size, under the block and never off the window.
-    property rect box
-    FrameAnimation {
-        running: root.visible && !root.plain
-        onTriggered: {
-            const c = [[0, 0], [root.width, 0], [0, root.height], [root.width, root.height]]
-                .map(q => root.mapToItem(root.span, q[0], q[1]));
-            const xs = c.map(q => q.x), ys = c.map(q => q.y);
-            const l = Math.min(...xs), u = Math.min(...ys);
-            root.box = Qt.rect(l, u, Math.max(...xs) - l, Math.max(...ys) - u);
-        }
-    }
+    // One panel for the chosen block, fixed in the bottom right corner of the span,
+    // so the block's lean and size do not bend it.
     Rectangle {
         parent: root.span
         z: 2000
-        visible: root.visible && !root.plain
-        x: Math.max(8, Math.min(parent.width - width - 8, root.box.x + root.box.width / 2 - width / 2))
-        y: Math.max(8, Math.min(parent.height - height - 8, root.box.y + root.box.height + 18))
+        visible: root.visible && root.chosen && !root.plain
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 18
         width: 280
         height: 78
         radius: 14

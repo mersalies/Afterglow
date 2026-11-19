@@ -11,8 +11,11 @@ import Quickshell.Widgets
 //                  top songs, or shuffled), top 10 songs, albums and singles
 //   no artist      songs and albums
 //   album opened   cover, title and buttons on the left, the track list on the right
-//   empty query    your library on that service as tiles: Spotify playlists and
-//                  albums, liked songs on YouTube Music, SoundCloud likes and history
+//   empty query    your library on that service as tiles (one sideways row
+//                  when there are suggestions under it): Spotify playlists and
+//                  albums, liked songs on YouTube Music, SoundCloud likes and history;
+//                  under it "for you": the service's own suggestions from what
+//                  was played (Picks.qml): similar artists, their new records, songs
 //   a pasted link  what the link holds
 // The service is the one on the transport bar's badge (Catalog.platform), picked
 // in its menu; the queue is a button in the field: it slides in on the right.
@@ -35,6 +38,7 @@ Item {
         input.text = text || "";
         Catalog.run(input.text);
         input.forceActiveFocus();
+        Picks.want(Catalog.platform);
     }
     function hide() {
         open = false;
@@ -78,10 +82,22 @@ Item {
         return out.filter(t => t.platform === Catalog.platform);
     }
 
+    // ---- For you (empty query, under the library)
+
+    readonly property var picks: Picks.of(Catalog.platform)
+    readonly property bool picksBusy: Picks.isBusy(Catalog.platform)
+    readonly property bool hasPicks: picks !== null
+        && (picks.artists.length > 0 || picks.albums.length > 0 || picks.tracks.length > 0)
+    Connections {
+        target: Catalog
+        function onPlatformChanged() { if (root.open) Picks.want(Catalog.platform); }
+    }
+
     // Library tiles per row and rows: one row or none folds the sheet lower.
     readonly property int libCols: Math.max(1, Math.floor((panel.openW - 28 + 14) / (150 + 14)))
     readonly property int libRows: Math.ceil(library.length / libCols)
     readonly property bool shortSheet: Catalog.album === null && browsing && libRows < 2 && !showQueue
+        && !hasPicks && !picksBusy
 
     function openTile(c) {
         Catalog.ticket++;
@@ -400,13 +416,85 @@ Item {
         }
     }
 
+    // A similar artist: a round photo and the name; a click searches for them.
+    component ArtistTile: Item {
+        id: at
+        property var item
+        property real size: 112
+        width: size
+        height: size + 44
+        Cover {
+            width: at.size
+            height: at.size
+            radius: at.size / 2
+            texture: 240
+            src: at.item?.image ?? ""
+            platform: Catalog.platform
+            icon: !!at.item?.image
+            scale: atArea.containsMouse ? 1.04 : 1
+            Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+            Text {
+                anchors.centerIn: parent
+                visible: !(at.item?.image)
+                text: (at.item?.name ?? "?").slice(0, 1).toUpperCase()
+                font.family: Theme.display
+                font.pixelSize: at.size * 0.38
+                color: Qt.rgba(1, 1, 1, 0.85)
+            }
+        }
+        Text {
+            y: at.size + 8
+            width: at.size
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+            text: at.item?.name ?? ""
+            font.family: Theme.font
+            font.pixelSize: 13
+            font.weight: Font.DemiBold
+            color: Theme.text
+        }
+        Text {
+            y: at.size + 26
+            width: at.size
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+            text: (at.item?.sub ?? "").replace(/\s*слушател\S*.*$/i, " слуш.")
+            font.family: Theme.font
+            font.pixelSize: 11
+            color: Theme.textTertiary
+        }
+        MouseArea {
+            id: atArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.show(at.item.name)
+        }
+    }
+
+    // A row of tiles that scrolls sideways (also with the wheel).
+    component TileRow: ListView {
+        id: tr
+        width: parent.width
+        orientation: ListView.Horizontal
+        spacing: 14
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            // Wheel down (negative delta) moves the row right, like a page scrolls down.
+            onWheel: e => tr.flick(-e.angleDelta.y * 7, 0)
+        }
+    }
+
     // Grey placeholder that breathes while results load.
     component Skeleton: Rectangle {
+        property bool breathing: root.busy
         radius: 14
         color: Qt.rgba(1, 1, 1, 0.08)
         SequentialAnimation on opacity {
             loops: Animation.Infinite
-            running: root.open && root.busy
+            running: root.open && breathing
             NumberAnimation { to: 0.45; duration: 700; easing.type: Easing.InOutSine }
             NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
         }
@@ -765,8 +853,8 @@ Item {
                                 onPicked: Catalog.openAlbum(modelData)
                             }
                             WheelHandler {
-                                acceptedDevices: PointerDevice.Mouse
-                                onWheel: e => albumRow.flick(e.angleDelta.y * 6, 0)
+                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                onWheel: e => albumRow.flick(-e.angleDelta.y * 7, 0)
                             }
                         }
 
@@ -832,24 +920,134 @@ Item {
                 id: libFlick
                 anchors.fill: parent
                 visible: Catalog.album === null && root.browsing
-                contentHeight: libFlow.implicitHeight
+                contentHeight: libCol.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
 
                 readonly property real tileSize: Math.max(110, Math.min(160, root.libRows >= 2 ? (height - 14) / 2 - 46 : height - 46))
 
-                Flow {
-                    id: libFlow
+                Column {
+                    id: libCol
                     width: libFlick.width
-                    spacing: 14
-                    Repeater {
-                        model: root.library
-                        Tile {
+                    spacing: 12
+
+                    // With suggestions below, the library is one row that
+                    // scrolls sideways, so "for you" shows without scrolling.
+                    readonly property bool compact: root.hasPicks || root.picksBusy
+                    TileRow {
+                        visible: libCol.compact && root.library.length > 0
+                        height: 176
+                        model: libCol.compact ? root.library : []
+                        delegate: Tile {
                             required property var modelData
                             item: modelData
-                            size: libFlick.tileSize
+                            size: 130
                             onPicked: root.openTile(modelData)
                         }
+                    }
+                    Flow {
+                        id: libFlow
+                        width: parent.width
+                        spacing: 14
+                        visible: !libCol.compact && root.library.length > 0
+                        Repeater {
+                            model: libCol.compact ? [] : root.library
+                            Tile {
+                                required property var modelData
+                                item: modelData
+                                size: libFlick.tileSize
+                                onPicked: root.openTile(modelData)
+                            }
+                        }
+                    }
+
+                    // ---- For you: what the service suggests
+                    Item {
+                        width: parent.width
+                        height: 40
+                        visible: root.hasPicks || root.picksBusy
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 1
+                            SectionTitle { text: "Для тебя" }
+                            Text {
+                                text: (root.picks?.seed ? "Похоже на " + root.picks.seed + "  ·  " : "")
+                                    + "подбирает " + Catalog.platformName(Catalog.platform)
+                                    + (Catalog.platform === "spotify" ? " по похожим из YouTube Music" : "")
+                                font.family: Theme.font
+                                font.pixelSize: 12
+                                color: Theme.textSecondary
+                            }
+                        }
+                        IconButton {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: "refresh"; size: 34; tooltip: "Подобрать заново"
+                            enabled: !root.picksBusy
+                            onClicked: Picks.want(Catalog.platform, true)
+                        }
+                    }
+
+                    Row {
+                        spacing: 14
+                        visible: root.picksBusy && !root.hasPicks
+                        Repeater { model: 6; Skeleton { breathing: root.picksBusy; width: 112; height: 112; radius: 56 } }
+                    }
+
+                    SectionTitle {
+                        visible: (root.picks?.artists.length ?? 0) > 0
+                        text: "Похожие исполнители"
+                        font.pixelSize: 15
+                    }
+                    TileRow {
+                        visible: (root.picks?.artists.length ?? 0) > 0
+                        height: 156
+                        model: root.picks?.artists ?? []
+                        delegate: ArtistTile {
+                            required property var modelData
+                            item: modelData
+                        }
+                    }
+
+                    SectionTitle {
+                        visible: (root.picks?.albums.length ?? 0) > 0
+                        text: "Новые релизы у похожих"
+                        font.pixelSize: 15
+                    }
+                    TileRow {
+                        visible: (root.picks?.albums.length ?? 0) > 0
+                        height: 176
+                        model: root.picks?.albums ?? []
+                        delegate: Tile {
+                            required property var modelData
+                            item: modelData
+                            size: 130
+                            onPicked: Catalog.openAlbum(modelData)
+                        }
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: 36
+                        visible: (root.picks?.tracks.length ?? 0) > 0
+                        SectionTitle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: Catalog.platform === "youtube" ? "Микс" : "Треки для тебя"
+                            font.pixelSize: 15
+                        }
+                        Row {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 8
+                            Action { icon: "play"; label: "Играть"; primary: true; onClicked: { Queue.playAll(root.picks.tracks); root.hide(); } }
+                            Action { icon: "plus"; label: "В очередь"; onClicked: Queue.addAll(root.picks.tracks) }
+                        }
+                    }
+                    SongGrid {
+                        width: parent.width
+                        visible: (root.picks?.tracks.length ?? 0) > 0
+                        list: (root.picks?.tracks ?? []).slice(0, 12)
+                        numbered: false
                     }
                 }
             }
@@ -859,7 +1057,7 @@ Item {
                 anchors.centerIn: parent
                 width: Math.min(460, parent.width - 40)
                 spacing: 10
-                visible: Catalog.album === null && root.browsing && root.library.length === 0
+                visible: Catalog.album === null && root.browsing && root.library.length === 0 && !root.hasPicks && !root.picksBusy
                 PlatformBadge {
                     anchors.horizontalCenter: parent.horizontalCenter
                     platform: Catalog.platform

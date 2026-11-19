@@ -4,6 +4,7 @@
     catalog.py search  PLATFORM QUERY      -> {"artist", "albums", "tracks"}
     catalog.py album   PLATFORM ID         -> {"title", "artist", "art", "sub", "tracks"}
     catalog.py library soundcloud USER     -> {"tracks", "sets"} (likes and playlists)
+    catalog.py picks   PLATFORM SEEDS      -> {"seed", "artists", "albums", "tracks"}
 
 PLATFORM: youtube-music (the YouTube Music app's own endpoints, unofficial),
 soundcloud and youtube (through yt-dlp). Prints one JSON object per line: a
@@ -194,30 +195,34 @@ def audience(text):
     return n * {"тыс": 1e3, "K": 1e3, "млн": 1e6, "M": 1e6, "млрд": 1e9, "B": 1e9}.get(m.group(2), 1)
 
 
-def ytm_search(q):
+def ytm_artist_in(found, q, exact=False):
+    """The artist channel a search answer names: exactly like the query (or
+    containing it); the same name often has several channels, so the one with
+    the most subscribers wins."""
     nq = norm(q)
-    artist = None
-    # The three searches at once; songs and albums are only used without an artist.
-    pool = ThreadPoolExecutor(3)
-    f_artists = pool.submit(ytm, "search", {"query": q, "params": ARTISTS})
-    f_songs = pool.submit(ytm, "search", {"query": q, "params": SONGS})
-    f_albums = pool.submit(ytm, "search", {"query": q, "params": ALBUMS})
-    pool.shutdown(wait=False)
-    # Artists named exactly like the query (or containing it); the same name often
-    # has several channels, so the one with the most subscribers wins.
-    best = -1
-    found = f_artists.result()
+    artist, best = None, -1
     for row in list(find(found, "musicResponsiveListItemRenderer"))[:6]:
         bid = next(find(row.get("navigationEndpoint", {}), "browseId"), "")
         cols = [c.get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}) for c in row.get("flexColumns", [])]
         name = runs(cols[0]) if cols else ""
         if not bid.startswith("UC") or not norm(name):
             continue
-        if not (norm(name) == nq or (len(nq) > 2 and nq in norm(name))):
+        if not (norm(name) == nq or (not exact and len(nq) > 2 and nq in norm(name))):
             continue
         fans = audience(runs(cols[1]) if len(cols) > 1 else "") + (1 if norm(name) == nq else 0)
         if fans > best:
             best, artist = fans, {"id": bid, "name": name}
+    return artist
+
+
+def ytm_search(q):
+    # The three searches at once; songs and albums are only used without an artist.
+    pool = ThreadPoolExecutor(3)
+    f_artists = pool.submit(ytm, "search", {"query": q, "params": ARTISTS})
+    f_songs = pool.submit(ytm, "search", {"query": q, "params": SONGS})
+    f_albums = pool.submit(ytm, "search", {"query": q, "params": ALBUMS})
+    pool.shutdown(wait=False)
+    artist = ytm_artist_in(f_artists.result(), q)
 
     if artist:
         page = ytm("browse", {"browseId": artist["id"]})
@@ -463,6 +468,166 @@ def yt_search(q):
     return {"artist": None, "albums": [], "tracks": tracks}
 
 
+# ------------------------------------------------------------ recommendations
+#
+# catalog.py picks PLATFORM SEEDS: what the service itself suggests from what
+# was listened to. SEEDS is JSON: {"artists": [names, most played first],
+# "videos": [YouTube ids], "soundcloud": [track links]}. Prints
+# {"seed", "artists": [{id, name, image, sub}], "albums", "tracks"}, first
+# without the albums (they take another round of requests).
+
+def ytm_carousel(page, *names):
+    for car in find(page, "musicCarouselShelfRenderer"):
+        title = runs(next(find(car.get("header", {}), "title"), None)).casefold()
+        if any(n in title for n in names):
+            return car.get("contents", [])
+    return []
+
+
+def ytm_panel_track(r):
+    vid = r.get("videoId") or next(find(r.get("navigationEndpoint", {}), "videoId"), None)
+    if not vid:
+        return None
+    artists, album = [], ""
+    for run in (r.get("longBylineText") or {}).get("runs", []):
+        bid = next(find(run.get("navigationEndpoint", {}), "browseId"), "")
+        if bid.startswith("UC"):
+            artists.append(run["text"])
+        elif bid.startswith("MPREb"):
+            album = run["text"]
+    if not artists:
+        artists = [((r.get("longBylineText") or {}).get("runs") or [{}])[0].get("text", "")]
+    return {"title": runs(r.get("title")), "artist": ", ".join(a for a in artists if a), "album": album,
+            "art": big_thumb(r.get("thumbnail", {}), 226) or "https://i.ytimg.com/vi/%s/hqdefault.jpg" % vid,
+            "uri": "https://music.youtube.com/watch?v=" + vid, "source": "youtube-music",
+            "length": seconds(runs(r.get("lengthText")))}
+
+
+def ytm_radio(vid, limit=20):
+    data = ytm("next", {"videoId": vid, "playlistId": "RDAMVM" + vid})
+    out = [t for t in (ytm_panel_track(r) for r in find(data, "playlistPanelVideoRenderer")) if t]
+    return [t for t in out if not t["uri"].endswith(vid)][:limit]
+
+
+def ytm_picks(seeds, records=True):
+    names = seeds.get("artists") or []
+    seed, page = None, None
+    for name in names[:3]:
+        found = ytm_artist_in(ytm("search", {"query": name, "params": ARTISTS}), name, exact=True)
+        if found:
+            seed, page = found, ytm("browse", {"browseId": found["id"]})
+            break
+    artists = []
+    if page:
+        for item in ytm_carousel(page, "похожие", "fans might", "similar"):
+            r = item.get("musicTwoRowItemRenderer") or {}
+            bid = next(find(r.get("navigationEndpoint", {}), "browseId"), "")
+            if bid.startswith("UC"):
+                artists.append({"id": bid, "name": runs(r.get("title")), "sub": runs(r.get("subtitle")),
+                                "image": big_thumb(r.get("thumbnailRenderer", {}), 300)})
+    # The radio of a song played here, else of the seed artist's best song.
+    vid = (seeds.get("videos") or [None])[0]
+    if not vid and page:
+        vid = next((t["uri"].split("v=")[-1] for t in ytm_rows(page, limit=1)), None)
+    tracks = ytm_radio(vid) if vid else []
+    out = {"seed": seed["name"] if seed else "", "artists": artists[:12], "albums": [], "tracks": tracks}
+    if not records:
+        return out
+    emit(out)
+
+    # The newest album or single of each similar artist.
+    def latest(a):
+        try:
+            p = ytm("browse", {"browseId": a["id"]})
+        except Exception:
+            return None
+        tiles = [t for t in (ytm_tile(i) for i in ytm_carousel(p, "альбом", "album") + ytm_carousel(p, "сингл", "single")) if t]
+        if not tiles:
+            return None
+        t = max(tiles, key=lambda t: t["year"])
+        t["sub"] = a["name"] + (" • " + t["year"] if t["year"] else "")
+        t["artist"] = a["name"]
+        return t
+    with ThreadPoolExecutor(6) as ex:
+        out["albums"] = [t for t in ex.map(latest, artists[:8]) if t]
+    return out
+
+
+def sc_picks(seeds):
+    links = [u.split("?")[0] for u in seeds.get("soundcloud") or [] if "soundcloud.com/" in u]
+    if not links:
+        return {"seed": "", "artists": [], "albums": [], "tracks": []}
+    with ThreadPoolExecutor(2) as ex:
+        found = list(ex.map(lambda u: ytdlp("--playlist-items", "1:15", u + "/recommended"), links[:2]))
+    tracks, seen = [], set(links)
+    for data in found:
+        for e in data.get("entries") or []:
+            url = (e.get("url") or "").split("?")[0]
+            m = re.search(r"//(?:www\.)?soundcloud\.com/([^/]+)/", url)
+            if not m or url in seen:
+                continue
+            seen.add(url)
+            tracks.append({"title": e.get("title") or "", "artist": m.group(1), "album": "", "art": "", "uri": url,
+                           "source": "soundcloud", "length": e.get("duration") or 0})
+    sc_fill_art(tracks[:24], "uri", "artist")
+    tracks = tracks[:24]
+    seed = sc_oembed(links[0])[1]
+    mine = {re.search(r"soundcloud\.com/([^/]+)/", u).group(1) for u in links}
+    artists, users = [], {norm(seed)}
+    for t in tracks:
+        user = re.search(r"soundcloud\.com/([^/]+)/", t["uri"]).group(1)
+        if norm(t["artist"]) not in users and user not in mine:
+            users.add(norm(t["artist"]))
+            artists.append({"id": "https://soundcloud.com/" + user, "name": t["artist"], "sub": "SoundCloud", "image": ""})
+    artists = artists[:10]
+    sc_fill_art([dict(a, art="") for a in artists], "id")
+    for a in artists:
+        a["image"] = META.get(a["id"], {}).get("art", "")
+    out = {"seed": seed, "artists": artists, "albums": [], "tracks": tracks}
+    emit(out)
+
+    def sets(a):
+        got = ytdlp("--playlist-items", "1:2", a["id"] + "/albums").get("entries") or []
+        return [{"id": s["url"], "title": s.get("title") or "", "sub": a["name"], "art": "", "year": "",
+                 "platform": "soundcloud", "artist": a["name"]} for s in got if s.get("url")]
+    with ThreadPoolExecutor(4) as ex:
+        albums = [x for group in ex.map(sets, artists[:5]) for x in group]
+    sc_fill_art(albums, "id")
+    out["albums"] = albums
+    return out
+
+
+def yt_picks(seeds):
+    # The mix of a video played here; a talk or a lesson has none, so then the
+    # mix of the most played artist's best song.
+    def song_of(name):
+        rows = ytm_rows(ytm("search", {"query": name, "params": SONGS}), limit=1)
+        return rows[0]["uri"].split("v=")[-1] if rows else None
+    candidates = list(seeds.get("videos") or [])[:2] + [("artist", a) for a in (seeds.get("artists") or [])[:1]]
+    for vid in candidates:
+        seed = ""
+        if isinstance(vid, tuple):
+            seed, vid = vid[1], song_of(vid[1])
+            if not vid:
+                continue
+        data = ytdlp("--playlist-items", "1:25", "https://www.youtube.com/watch?v=%s&list=RD%s" % (vid, vid))
+        tracks = [t for t in (entry_track(e, "youtube") for e in data.get("entries") or []) if t and vid not in t["uri"]]
+        if tracks:
+            return {"seed": seed, "artists": [], "albums": [], "tracks": tracks[:20]}
+    return {"seed": "", "artists": [], "albums": [], "tracks": []}
+
+
+def picks(platform, raw):
+    seeds = json.loads(raw)
+    # Spotify closed its recommendations to new apps: the similar artists come
+    # from YouTube Music, and Spotify.qml finds their records on Spotify.
+    if platform in ("youtube-music", "spotify"):
+        return ytm_picks(seeds, records=platform == "youtube-music")
+    if platform == "soundcloud":
+        return sc_picks(seeds)
+    return yt_picks(seeds)
+
+
 # --------------------------------------------------------------------- main
 
 def main():
@@ -477,6 +642,10 @@ def main():
         ("search", "youtube"): yt_search,
         ("library", "soundcloud"): sc_library,
     }.get((what, platform))
+    if what == "picks":
+        emit(picks(platform, arg))
+        save_meta()
+        return
     if not fn:
         sys.exit(2)
     emit(fn(arg))

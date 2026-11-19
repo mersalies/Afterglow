@@ -630,7 +630,7 @@ FloatingWindow {
                     spacing: 10
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "Перетащи блоки, под каждым — наклон и размер. Двойной клик по блоку — как было."
+                        text: "Перетащи блок; наклон и размер выбранного — справа внизу. Двойной клик — как было."
                         font.family: Theme.font
                         font.pixelSize: 13
                         color: Theme.text

@@ -106,7 +106,8 @@ Singleton {
                         root.media.source = "file://" + out;
                         root.media.play();
                     }
-                } else if (!retried) {
+                } else if (!retried && !/DRM protected/i.test(err)) {
+                    // A DRM-locked track fails the same way in every format: no retry.
                     console.warn("Afterglow: audio fetch failed, retrying:", forUri, err);
                     root.startFetch(forUri, true);
                 } else {
