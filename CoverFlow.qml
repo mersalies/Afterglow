@@ -125,27 +125,41 @@ Item {
                     blurMax: 40
                 }
 
+                // The card: a dark glass frame; the cover sits inside it with its own
+                // rounded corners, the caption under it (bare: the cover alone).
                 ClippingRectangle {
+                    id: frame
+                    readonly property real pad: flow.bare ? 0 : Math.round(flow.cardSize * 0.04)
                     anchors.fill: parent
-                    radius: flow.bare ? 8 : 22
-                    color: Qt.rgba(1, 1, 1, 0.10)
+                    radius: flow.bare ? 8 : 24
+                    color: flow.bare ? "transparent" : Qt.rgba(0.11, 0.11, 0.13, 0.78)
                     border.width: 1
-                    border.color: Qt.rgba(1, 1, 1, card.centre ? 0.22 : 0.12)
+                    border.color: Qt.rgba(1, 1, 1, card.centre ? 0.20 : 0.10)
 
-                    Item {
+                    // Soft light from above, as on glass.
+                    Rectangle {
+                        visible: !flow.bare
+                        anchors.fill: parent
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0.07) }
+                            GradientStop { position: 0.6; color: Qt.rgba(1, 1, 1, 0) }
+                        }
+                    }
+
+                    ClippingRectangle {
                         id: art
-                        width: parent.width
-                        height: parent.width
+                        x: frame.pad
+                        y: frame.pad
+                        width: parent.width - frame.pad * 2
+                        height: width
+                        radius: flow.bare ? 0 : Math.max(10, frame.radius - frame.pad)
+                        color: Qt.lighter(Player.tint, 1.6)
 
-                        Rectangle {
-                            anchors.fill: parent
-                            color: Qt.lighter(Player.tint, 1.6)
-                            Icon {
-                                anchors.centerIn: parent
-                                kind: "music"
-                                size: parent.width * 0.28
-                                color: Theme.textTertiary
-                            }
+                        Icon {
+                            anchors.centerIn: parent
+                            kind: "music"
+                            size: parent.width * 0.28
+                            color: Theme.textTertiary
                         }
                         CrossfadeImage {
                             anchors.fill: parent
@@ -155,16 +169,17 @@ Item {
                         }
                     }
 
-                    // Caption plate under the cover
+                    // Caption under the cover
                     Column {
                         visible: !flow.bare
                         anchors.top: art.bottom
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
-                        anchors.margins: 12
-                        anchors.topMargin: 10
-                        spacing: 2
+                        anchors.leftMargin: 14
+                        anchors.rightMargin: 14
+                        anchors.topMargin: flow.cardSize * 0.05
+                        spacing: 3
 
                         Text {
                             width: parent.width
@@ -172,8 +187,8 @@ Item {
                             elide: Text.ElideRight
                             text: card.modelData.title || "Без названия"
                             font.family: Theme.font
-                            font.pixelSize: Math.max(12, flow.cardSize * 0.05)
-                            font.weight: Font.DemiBold
+                            font.pixelSize: Math.max(13, flow.cardSize * 0.06)
+                            font.weight: Font.Bold
                             color: Theme.text
                         }
                         Text {
@@ -182,7 +197,7 @@ Item {
                             elide: Text.ElideRight
                             text: card.modelData.artist || ""
                             font.family: Theme.font
-                            font.pixelSize: Math.max(11, flow.cardSize * 0.038)
+                            font.pixelSize: Math.max(11, flow.cardSize * 0.044)
                             color: Theme.textSecondary
                         }
                     }
